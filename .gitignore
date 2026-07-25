@@ -1,0 +1,15 @@
+﻿__pycache__/
+*.py[cod]
+*.class
+venv/
+env/
+.vscode/
+.idea/
+*.mp4
+*.mkv
+*.db
+*.sqlite
+data/large_videos/
+output/highlights/
+logs/*.log
+.env

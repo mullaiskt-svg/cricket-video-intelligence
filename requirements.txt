@@ -1,13 +1,24 @@
-﻿opencv-python==4.8.1.78
+# Video Processing
+opencv-python==4.8.1.78
 scenedetect==0.6.1
 ffmpeg-python==0.2.1
+
+# OCR
 pytesseract==0.3.10
 pillow==10.0.0
+
+# Data Processing
 numpy==1.24.3
 pandas==2.0.3
+
+# Database
 sqlalchemy==2.0.20
+
+# Utilities
 pydantic==2.0.0
 pyyaml==6.0.1
 python-dotenv==1.0.0
 tqdm==4.66.1
+
+# Logging
 loguru==0.7.0

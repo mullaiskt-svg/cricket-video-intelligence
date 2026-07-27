@@ -32,9 +32,9 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 **Purpose**: Project initialization and basic structure
 
-- [ ] T001 Create `src/cvip/video/{__init__.py,loader.py,metadata.py,hashing.py,models.py,errors.py}` and `src/cvip/common/{__init__.py,diagnostics.py}` as empty modules per plan.md Source Code layout
-- [ ] T002 [P] Create `tests/contract/`, `tests/integration/`, `tests/unit/`, `tests/benchmark/`, and `tests/fixtures/video_loader/` directories (with `__init__.py` in the first four)
-- [ ] T003 [P] Configure pytest test discovery for `tests/{contract,integration,unit,benchmark}/` and a `pytest-cov` coverage-source setting for `src/cvip/video` in `pyproject.toml` (project-wide decision: `pyproject.toml` is the single source for packaging metadata, the `cvip` console-script entry point, and `black`/`pylint`/`mypy`/`pytest` tool config — not scattered `pytest.ini`/ad hoc CLI flags)
+- [X] T001 Create `src/cvip/video/{__init__.py,loader.py,metadata.py,hashing.py,models.py,errors.py}` and `src/cvip/common/{__init__.py,diagnostics.py}` as empty modules per plan.md Source Code layout
+- [X] T002 [P] Create `tests/contract/`, `tests/integration/`, `tests/unit/`, `tests/benchmark/`, and `tests/fixtures/video_loader/` directories (with `__init__.py` in the first four)
+- [X] T003 [P] Configure pytest test discovery for `tests/{contract,integration,unit,benchmark}/` and a `pytest-cov` coverage-source setting for `src/cvip/video` in `pyproject.toml` (project-wide decision: `pyproject.toml` is the single source for packaging metadata, the `cvip` console-script entry point, and `black`/`pylint`/`mypy`/`pytest` tool config — not scattered `pytest.ini`/ad hoc CLI flags)
 
 ---
 
@@ -44,12 +44,12 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 [P] Implement `MatchVideoSource` and `LoadResult` dataclasses per [data-model.md](./data-model.md) in `src/cvip/video/models.py` — including `frame_count` and `file_hash` fields (document that `resolution` is decoded-frame-authoritative per FR-012, and `file_hash` is a sampled, non-cryptographic digest per FR-014)
-- [ ] T005 [P] Implement the `failure_reason` enum (`FILE_NOT_FOUND`, `UNSUPPORTED_FORMAT`, `FILE_LOCKED_OR_INACCESSIBLE`, `CORRUPTED_OR_UNDECODABLE`) per [contracts/video_loader_contract.md](./contracts/video_loader_contract.md) in `src/cvip/video/errors.py`
-- [ ] T006 [P] Implement the `ExecutionDiagnostics` dataclass and a `loguru`-based structured JSON emitter per [data-model.md](./data-model.md) and `specs/technical_plan.md` in `src/cvip/common/diagnostics.py` (FR-013) — this is shared infrastructure future pipeline modules will also import
-- [ ] T007 Wire diagnostics/log configuration into `src/cvip/video/__init__.py` so `loader.py` can emit both a plain log line (FR-007) and an `ExecutionDiagnostics` record (FR-013) per attempt (depends on T006)
-- [ ] T008 [P] Create a fixture-generation script at `tests/fixtures/video_loader/generate_fixtures.py` that uses `ffmpeg`'s `testsrc`/`color` sources to produce: a valid short MP4, a valid short MKV, a truncated/corrupted MP4, a zero-byte file, an unsupported-format file (`.avi`), and a deterministic low-bitrate multi-hour (~3.5h) synthetic MP4 at target resolution/FPS for performance testing (SC-001, SC-005) — all under `tests/fixtures/video_loader/`
-- [ ] T009 [P] Create a test helper at `tests/fixtures/video_loader/lock_helper.py`: a context manager that opens a given file with an exclusive handle for its duration, to deterministically simulate a locked/inaccessible file on Windows during tests
+- [X] T004 [P] Implement `MatchVideoSource` and `LoadResult` dataclasses per [data-model.md](./data-model.md) in `src/cvip/video/models.py` — including `frame_count` and `file_hash` fields (document that `resolution` is decoded-frame-authoritative per FR-012, and `file_hash` is a sampled, non-cryptographic digest per FR-014)
+- [X] T005 [P] Implement the `failure_reason` enum (`FILE_NOT_FOUND`, `UNSUPPORTED_FORMAT`, `FILE_LOCKED_OR_INACCESSIBLE`, `CORRUPTED_OR_UNDECODABLE`) per [contracts/video_loader_contract.md](./contracts/video_loader_contract.md) in `src/cvip/video/errors.py`
+- [X] T006 [P] Implement the `ExecutionDiagnostics` dataclass and a `loguru`-based structured JSON emitter per [data-model.md](./data-model.md) and `specs/technical_plan.md` in `src/cvip/common/diagnostics.py` (FR-013) — this is shared infrastructure future pipeline modules will also import
+- [X] T007 Wire diagnostics/log configuration into `src/cvip/video/__init__.py` so `loader.py` can emit both a plain log line (FR-007) and an `ExecutionDiagnostics` record (FR-013) per attempt (depends on T006)
+- [X] T008 [P] Create a fixture-generation script at `tests/fixtures/video_loader/generate_fixtures.py` that uses `ffmpeg`'s `testsrc`/`color` sources to produce: a valid short MP4, a valid short MKV, a truncated/corrupted MP4, a zero-byte file, an unsupported-format file (`.avi`), and a deterministic low-bitrate multi-hour (~3.5h) synthetic MP4 at target resolution/FPS for performance testing (SC-001, SC-005) — all under `tests/fixtures/video_loader/`
+- [X] T009 [P] Create a test helper at `tests/fixtures/video_loader/lock_helper.py`: a context manager that opens a given file with an exclusive handle for its duration, to deterministically simulate a locked/inaccessible file on Windows during tests
 
 **Checkpoint**: Foundation ready — user story implementation can now begin
 
@@ -65,17 +65,17 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 > Write these tests FIRST, ensure they FAIL before implementation
 
-- [ ] T010 [P] [US1] Contract test asserting `load_video()` returns a `LoadResult` matching the shape in [contracts/video_loader_contract.md](./contracts/video_loader_contract.md) for a valid fixture, in `tests/contract/test_video_loader_contract.py`
-- [ ] T011 [P] [US1] Integration test loading the valid MP4 and MKV fixtures (T008) and asserting `status == SUCCESS` with correct `duration_seconds`, `resolution`, `frame_rate`, `frame_count`, `codec`, and a non-empty `file_hash`, in `tests/integration/test_video_loader_e2e.py`
-- [ ] T012 [P] [US1] Unit test asserting decoded-frame resolution wins when it conflicts with container header metadata (mock `cv2.VideoCapture` so `.get(CAP_PROP_FRAME_WIDTH/HEIGHT)` and the decoded frame's `.shape` disagree; assert the frame's shape is what's reported) per FR-012, in `tests/unit/test_video_loader_validation.py`
-- [ ] T013 [P] [US1] Unit test for `compute_file_hash()`: identical files (or the same file called twice) yield identical hashes, two distinct fixtures yield different hashes, and the function does not read the full file for a large input (assert bytes read is bounded, independent of file size), in `tests/unit/test_video_loader_validation.py`
+- [X] T010 [P] [US1] Contract test asserting `load_video()` returns a `LoadResult` matching the shape in [contracts/video_loader_contract.md](./contracts/video_loader_contract.md) for a valid fixture, in `tests/contract/test_video_loader_contract.py`
+- [X] T011 [P] [US1] Integration test loading the valid MP4 and MKV fixtures (T008) and asserting `status == SUCCESS` with correct `duration_seconds`, `resolution`, `frame_rate`, `frame_count`, `codec`, and a non-empty `file_hash`, in `tests/integration/test_video_loader_e2e.py`
+- [X] T012 [P] [US1] Unit test asserting decoded-frame resolution wins when it conflicts with container header metadata (mock `cv2.VideoCapture` so `.get(CAP_PROP_FRAME_WIDTH/HEIGHT)` and the decoded frame's `.shape` disagree; assert the frame's shape is what's reported) per FR-012, in `tests/unit/test_video_loader_validation.py`
+- [X] T013 [P] [US1] Unit test for `compute_file_hash()`: identical files (or the same file called twice) yield identical hashes, two distinct fixtures yield different hashes, and the function does not read the full file for a large input (assert bytes read is bounded, independent of file size), in `tests/unit/test_video_loader_validation.py`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Implement ffprobe-based codec identification in `src/cvip/video/metadata.py` (depends on T005)
-- [ ] T015 [US1] Implement `compute_file_hash()` in `src/cvip/video/hashing.py`: SHA-256 (via stdlib `hashlib`) over the first 1 MiB + last 1 MiB + exact file size — not a full-file read — per research.md and FR-014 (depends on T001)
-- [ ] T016 [US1] Implement `load_video()` success path in `src/cvip/video/loader.py`: open with `cv2.VideoCapture`, confirm `isOpened()`, read the first frame, derive `duration_seconds`/`frame_rate`/`frame_count` from container properties and `resolution` from the decoded frame's shape (FR-012), call `metadata.py` for codec, and call `hashing.py` for `file_hash` (depends on T004, T014, T015)
-- [ ] T017 [US1] Wire success-path logging and `ExecutionDiagnostics` emission into `load_video()` in `src/cvip/video/loader.py` (depends on T007, T016)
+- [X] T014 [US1] Implement ffprobe-based codec identification in `src/cvip/video/metadata.py` (depends on T005)
+- [X] T015 [US1] Implement `compute_file_hash()` in `src/cvip/video/hashing.py`: SHA-256 (via stdlib `hashlib`) over the first 1 MiB + last 1 MiB + exact file size — not a full-file read — per research.md and FR-014 (depends on T001)
+- [X] T016 [US1] Implement `load_video()` success path in `src/cvip/video/loader.py`: open with `cv2.VideoCapture`, confirm `isOpened()`, read the first frame, derive `duration_seconds`/`frame_rate`/`frame_count` from container properties and `resolution` from the decoded frame's shape (FR-012), call `metadata.py` for codec, and call `hashing.py` for `file_hash` (depends on T004, T014, T015)
+- [X] T017 [US1] Wire success-path logging and `ExecutionDiagnostics` emission into `load_video()` in `src/cvip/video/loader.py` (depends on T007, T016)
 
 **Checkpoint**: User Story 1 is fully functional and independently testable — a valid video reliably yields correct, frame-authoritative metadata plus a stable content hash.
 
@@ -89,16 +89,16 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T018 [P] [US2] Integration test asserting `FILE_NOT_FOUND` for a nonexistent path and for a directory path, and `UNSUPPORTED_FORMAT` for the `.avi` fixture, in `tests/integration/test_video_loader_e2e.py`
-- [ ] T019 [P] [US2] Integration test asserting `FILE_LOCKED_OR_INACCESSIBLE` using the lock helper (T009), and `CORRUPTED_OR_UNDECODABLE` for the truncated and zero-byte fixtures (T008) and for a file with an unusable frame rate/frame count, in `tests/integration/test_video_loader_e2e.py`
-- [ ] T020 [P] [US2] Unit tests for the failure-reason classification order — existence/directory check, then format-by-extension check, then lock/access check, then decodability check — confirming each file gets exactly one deterministic reason, in `tests/unit/test_video_loader_validation.py`
+- [X] T018 [P] [US2] Integration test asserting `FILE_NOT_FOUND` for a nonexistent path and for a directory path, and `UNSUPPORTED_FORMAT` for the `.avi` fixture, in `tests/integration/test_video_loader_e2e.py`
+- [X] T019 [P] [US2] Integration test asserting `FILE_LOCKED_OR_INACCESSIBLE` using the lock helper (T009), and `CORRUPTED_OR_UNDECODABLE` for the truncated and zero-byte fixtures (T008) and for a file with an unusable frame rate/frame count, in `tests/integration/test_video_loader_e2e.py`
+- [X] T020 [P] [US2] Unit tests for the failure-reason classification order — existence/directory check, then format-by-extension check, then lock/access check, then decodability check — confirming each file gets exactly one deterministic reason, in `tests/unit/test_video_loader_validation.py`
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Implement file-existence (including directory-path) and container-format-by-extension checks in `load_video()`, rejecting with `FILE_NOT_FOUND`/`UNSUPPORTED_FORMAT` before attempting to open the file, in `src/cvip/video/loader.py` (depends on T016)
-- [ ] T022 [US2] Implement locked/inaccessible detection — catch the `PermissionError`/`OSError` raised when the file can't be opened for reading — mapping to `FILE_LOCKED_OR_INACCESSIBLE`, in `src/cvip/video/loader.py` (depends on T021)
-- [ ] T023 [US2] Implement corrupted/undecodable detection (`isOpened()` false, first-frame read failure, or zero/negative frame count/FPS) mapping to `CORRUPTED_OR_UNDECODABLE`, in `src/cvip/video/loader.py` (depends on T022)
-- [ ] T024 [US2] Wire failure-path logging and `ExecutionDiagnostics` emission (specific reason + diagnostic detail per FR-005/FR-007/FR-013) into `load_video()` in `src/cvip/video/loader.py` (depends on T007, T023)
+- [X] T021 [US2] Implement file-existence (including directory-path) and container-format-by-extension checks in `load_video()`, rejecting with `FILE_NOT_FOUND`/`UNSUPPORTED_FORMAT` before attempting to open the file, in `src/cvip/video/loader.py` (depends on T016)
+- [X] T022 [US2] Implement locked/inaccessible detection — catch the `PermissionError`/`OSError` raised when the file can't be opened for reading — mapping to `FILE_LOCKED_OR_INACCESSIBLE`, in `src/cvip/video/loader.py` (depends on T021)
+- [X] T023 [US2] Implement corrupted/undecodable detection (`isOpened()` false, first-frame read failure, or zero/negative frame count/FPS) mapping to `CORRUPTED_OR_UNDECODABLE`, in `src/cvip/video/loader.py` (depends on T022)
+- [X] T024 [US2] Wire failure-path logging and `ExecutionDiagnostics` emission (specific reason + diagnostic detail per FR-005/FR-007/FR-013) into `load_video()` in `src/cvip/video/loader.py` (depends on T007, T023)
 
 **Checkpoint**: User Stories 1 AND 2 both work independently — valid videos load correctly, invalid ones are rejected with one deterministic reason each.
 
@@ -112,12 +112,12 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T025 [P] [US3] Test confirming `src/cvip/video/*.py` and `src/cvip/common/diagnostics.py` make no socket/network calls (e.g., mock/patch `socket` to raise if used, and assert `load_video()` still succeeds) in `tests/unit/test_video_loader_validation.py`
-- [ ] T026 [P] [US3] Performance test asserting `load_video()` completes within 10 seconds and process memory attributable to the call stays under ~200MB, against the multi-hour fixture (T008) — including the `compute_file_hash()` step, confirming the sampled approach doesn't reintroduce a full-file-read cost — per [quickstart.md](./quickstart.md) Scenario 3, in `tests/benchmark/test_video_loader_performance.py`
+- [X] T025 [P] [US3] Test confirming `src/cvip/video/*.py` and `src/cvip/common/diagnostics.py` make no socket/network calls (e.g., mock/patch `socket` to raise if used, and assert `load_video()` still succeeds) in `tests/unit/test_video_loader_validation.py`
+- [X] T026 [P] [US3] Performance test asserting `load_video()` completes within 10 seconds and process memory attributable to the call stays under ~200MB, against the multi-hour fixture (T008) — including the `compute_file_hash()` step, confirming the sampled approach doesn't reintroduce a full-file-read cost — per [quickstart.md](./quickstart.md) Scenario 3, in `tests/benchmark/test_video_loader_performance.py`
 
 ### Implementation for User Story 3
 
-- [ ] T027 [US3] Review `src/cvip/video/loader.py`, `src/cvip/video/metadata.py`, `src/cvip/video/hashing.py`, and `src/cvip/common/diagnostics.py` to confirm only local file I/O, the local `ffprobe` subprocess, and local `psutil` calls are used — no network sockets — and fix any finding (depends on T016, T023, T007)
+- [X] T027 [US3] Review `src/cvip/video/loader.py`, `src/cvip/video/metadata.py`, `src/cvip/video/hashing.py`, and `src/cvip/common/diagnostics.py` to confirm only local file I/O, the local `ffprobe` subprocess, and local `psutil` calls are used — no network sockets — and fix any finding (depends on T016, T023, T007)
 
 **Checkpoint**: All three user stories are independently functional — the module loads valid videos, rejects invalid ones with one deterministic reason each, and does so offline within budget.
 
@@ -127,11 +127,11 @@ Single project, per plan.md Project Structure: `src/cvip/video/`, `src/cvip/comm
 
 **Purpose**: Improvements and gates that affect the whole feature, not any single story
 
-- [ ] T028 [P] Run all four [quickstart.md](./quickstart.md) scenarios (including Scenario 4, diagnostics emission, and the Scenario 1 hash-stability check) manually on target-class hardware (or the closest available) and record pass/fail results in `specs/001-video-loader/quickstart.md`
-- [ ] T029 [P] Add docstrings to all public functions/classes in `src/cvip/video/{loader,metadata,hashing,models,errors}.py` and `src/cvip/common/diagnostics.py`
-- [ ] T030 Re-run `tests/contract/test_video_loader_contract.py` after US2 and US3 changes to confirm no regression against the contract
-- [ ] T031 Run the full test suite (`pytest`) and confirm all contract/integration/unit tests pass
-- [ ] T032 Run the constitution-mandated coverage gate: `pytest --cov=src/cvip/video --cov-fail-under=100`. This feature is not complete until this passes — add targeted tests for any branch it reports as uncovered (Constitution Principle VII)
+- [X] T028 [P] Run all four [quickstart.md](./quickstart.md) scenarios (including Scenario 4, diagnostics emission, and the Scenario 1 hash-stability check) manually on target-class hardware (or the closest available) and record pass/fail results in `specs/001-video-loader/quickstart.md`
+- [X] T029 [P] Add docstrings to all public functions/classes in `src/cvip/video/{loader,metadata,hashing,models,errors}.py` and `src/cvip/common/diagnostics.py`
+- [X] T030 Re-run `tests/contract/test_video_loader_contract.py` after US2 and US3 changes to confirm no regression against the contract
+- [X] T031 Run the full test suite (`pytest`) and confirm all contract/integration/unit tests pass
+- [X] T032 Run the constitution-mandated coverage gate: `pytest --cov=src/cvip/video --cov-fail-under=100`. This feature is not complete until this passes — add targeted tests for any branch it reports as uncovered (Constitution Principle VII)
 
 ---
 

@@ -145,7 +145,20 @@ def _load_video_impl(file_path: str) -> LoadResult:
             FailureReason.CORRUPTED_OR_UNDECODABLE, f"Codec identification failed: {exc}"
         )
 
-    file_hash = hashing.compute_file_hash(file_path)
+    # TOCTOU guard: the file passed every check above, but nothing prevents it
+    # from becoming inaccessible or disappearing between then and now (e.g.
+    # deleted, or a lock acquired mid-call) -- compute_file_hash() opens the
+    # file again and must not be allowed to raise past this function.
+    try:
+        file_hash = hashing.compute_file_hash(file_path)
+    except PermissionError as exc:
+        return LoadResult.failure(FailureReason.FILE_LOCKED_OR_INACCESSIBLE, str(exc))
+    except FileNotFoundError as exc:
+        return LoadResult.failure(FailureReason.FILE_NOT_FOUND, str(exc))
+    except OSError as exc:
+        return LoadResult.failure(
+            FailureReason.CORRUPTED_OR_UNDECODABLE, f"Failed to hash file: {exc}"
+        )
 
     source = MatchVideoSource(
         file_path=file_path,

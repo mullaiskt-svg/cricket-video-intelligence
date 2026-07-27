@@ -126,6 +126,10 @@ def test_zero_byte_file_is_corrupted_or_undecodable():
     assert result.failure_reason == FailureReason.CORRUPTED_OR_UNDECODABLE
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="lock_helper uses msvcrt, which only exists on Windows",
+)
 def test_locked_file_is_locked_or_inaccessible():
     from lock_helper import locked_file
 

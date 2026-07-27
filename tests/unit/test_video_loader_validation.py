@@ -203,6 +203,66 @@ def test_identify_codec_raises_when_ffprobe_finds_no_video_stream(mocker):
         identify_codec("irrelevant.mp4")
 
 
+def _mock_successful_decode(mocker):
+    """Get load_video() past the decode+codec steps so a hashing.compute_file_hash
+    failure is the only thing left to trigger -- used by the TOCTOU tests below."""
+    fake_frame = np.zeros((480, 640, 3), dtype="uint8")
+    mock_capture = mock.MagicMock()
+    mock_capture.isOpened.return_value = True
+    mock_capture.read.return_value = (True, fake_frame)
+    mock_capture.get.return_value = 25.0
+    mocker.patch("cv2.VideoCapture", return_value=mock_capture)
+    mocker.patch("cvip.video.metadata.identify_codec", return_value="h264")
+
+
+def test_hash_permission_error_after_decode_is_locked_or_inaccessible(mocker, tmp_path):
+    """TOCTOU: the file passed the earlier lock/decode checks but becomes
+    inaccessible by the time compute_file_hash() re-opens it."""
+    fake_path = tmp_path / "fake.mp4"
+    fake_path.write_bytes(b"")
+    _mock_successful_decode(mocker)
+    mocker.patch(
+        "cvip.video.hashing.compute_file_hash",
+        side_effect=PermissionError("access denied"),
+    )
+
+    result = load_video(str(fake_path))
+
+    assert result.status == LoadStatus.FAILURE
+    assert result.failure_reason == FailureReason.FILE_LOCKED_OR_INACCESSIBLE
+
+
+def test_hash_file_not_found_after_decode_is_file_not_found(mocker, tmp_path):
+    """TOCTOU: the file is deleted between decoding and hashing."""
+    fake_path = tmp_path / "fake.mp4"
+    fake_path.write_bytes(b"")
+    _mock_successful_decode(mocker)
+    mocker.patch(
+        "cvip.video.hashing.compute_file_hash",
+        side_effect=FileNotFoundError("gone"),
+    )
+
+    result = load_video(str(fake_path))
+
+    assert result.status == LoadStatus.FAILURE
+    assert result.failure_reason == FailureReason.FILE_NOT_FOUND
+
+
+def test_hash_generic_os_error_after_decode_is_corrupted(mocker, tmp_path):
+    fake_path = tmp_path / "fake.mp4"
+    fake_path.write_bytes(b"")
+    _mock_successful_decode(mocker)
+    mocker.patch(
+        "cvip.video.hashing.compute_file_hash",
+        side_effect=OSError("disk error"),
+    )
+
+    result = load_video(str(fake_path))
+
+    assert result.status == LoadStatus.FAILURE
+    assert result.failure_reason == FailureReason.CORRUPTED_OR_UNDECODABLE
+
+
 # --- FR-014: sampled file hash ---------------------------------------------
 
 

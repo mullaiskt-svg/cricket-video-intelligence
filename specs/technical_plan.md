@@ -15,6 +15,9 @@ Input Video (MP4/MKV, 3-4hr)
 [Module 1] Video Loader
     - Detect FPS, resolution, duration, codec
     ↓
+[Module 1a] Frame Extraction Service  <-- shared by Modules 2, 3, 4, (future) 6
+    - Configurable-rate frame streaming, timestamps, progress, resume
+    ↓
 [Module 2] Scene Detection (PySceneDetect + OpenCV)
     - Detect scene changes, camera transitions, replay transitions
     ↓
@@ -35,6 +38,8 @@ Input Video (MP4/MKV, 3-4hr)
     ↓
 Event Database (SQLite) + Timeline JSON
 ```
+
+Modules 2, 3, 4 (and, when built, 6) all read pixel data exclusively through Module 1a — none of them opens the video file directly. See Module 1a below for why, and for the open question about whether they can share a single decode pass.
 
 ### Phase 2: Highlight Generation
 [PRD Section 6]
@@ -65,23 +70,42 @@ Authoritative spec, plan, data model, and contract now live in [specs/001-video-
 - Output: `LoadResult` — on success, `duration_seconds`, `resolution`, `frame_rate`, `codec`; on failure, a specific `failure_reason` (`FILE_NOT_FOUND`, `UNSUPPORTED_FORMAT`, `CORRUPTED_OR_UNDECODABLE`)
 - Validation: file must exist and decode at least one frame before being considered valid; failures block all downstream modules (fail-fast, per constitution Principle VI)
 
-### Module 1a: Frame Sampler (MVP addition)
-- Samples frames at a fixed 1 FPS ahead of Scoreboard OCR (Module 4), decoupled from Module 2's scene-boundary detection
-- Rationale: keeps OCR cadence fixed and cheap regardless of how often scene cuts occur; implements the "sample frames at 1 FPS for OCR" mitigation in [docs/RISK_REGISTER.md](../docs/RISK_REGISTER.md) R3 (Performance on Low-End CPU)
-- Output: a frame-index + timestamp stream consumed by Module 4
+### Module 1a: Frame Extraction Service
+
+**Revised scope**: originally scoped as a narrow "sample frames at 1 FPS for OCR" step. Reframed as the platform's single shared abstraction for reading frames from a validated video. Every downstream module that needs pixel data — Scene Detection (2), Replay Detection (3), Scoreboard OCR (4), and (when built) Fielding Detection (6) and any future computer-vision module — MUST consume frames through this service rather than opening the video file with OpenCV directly. This is what constitution Principle V ("Modular & Extensible Architecture") actually requires for frame access: one shared contract, not five modules each independently wrapping `cv2.VideoCapture`.
+
+**Input**: a successful `LoadResult` from Video Loader (`specs/001-video-loader/`) — never a raw file path; the service trusts Video Loader's validation rather than re-validating the file itself.
+
+**Responsibilities**:
+- **Configurable sampling rate**: callers specify how densely they need frames — every frame (Scene Detection's likely need), a fixed rate such as 1 FPS (Scoreboard OCR's need, per `config/default.yaml`'s `video.sample_fps`), or a custom frame-index/timestamp list. Not hardcoded to any one rate.
+- **Timestamp/frame-index generation**: every yielded frame carries both its 0-based index in the *original* video and its timestamp in seconds from match start — no caller computes this itself.
+- **Streaming iteration**: exposed as a generator/iterator, never a function returning a list — the service must not hold the whole video (or a large fraction of it) in memory at once, per the constitution's <6GB budget (Principle II).
+- **Deterministic output**: the same video plus the same sampling configuration always yields the identical sequence of (frame_index, timestamp) pairs, run to run — no dependency on wall-clock timing or thread scheduling.
+- **Progress reporting**: exposes current position (frames processed / total, or elapsed / total duration) so the CLI (`tqdm` is already a dependency) or the Pipeline Orchestrator can report progress during a multi-hour extraction.
+- **Resume support**: extraction can start from an arbitrary frame index or timestamp, not only from the beginning — this is what lets the Pipeline Orchestrator's "resume interrupted processing" responsibility (see below) skip already-processed frames instead of restarting a multi-hour extraction from zero.
+- **Standardized diagnostics**: emits one `ExecutionDiagnostics` record (`src/cvip/common/diagnostics.py`) per extraction run (covering the whole requested range), not per-frame — a per-frame record would itself become a performance and log-volume problem at 10,000+ frames per match.
+
+**Resolved during `/speckit-plan`** (`specs/002-frame-extraction-service/research.md`):
+- **Shared decode pass**: decided against, for v1. Each caller (Scene Detection, Replay Detection, Scoreboard OCR) performs its own independent extraction request rather than sharing one broadcast decode pass — a true shared pass would need buffering/backpressure machinery this single-threaded, synchronous codebase has no precedent for. The Performance Targets budget below already priced Scene Detection's full-frame pass and this service's 1 FPS pass as *separate* line items, so this decision doesn't invalidate that budget — it's what the budget already assumed. Revisit only if the aggregate 40-minute budget proves too tight once Modules 2-4 are actually benchmarked.
+- **Module location**: `src/cvip/video/frame_extraction.py` (plus `frame_extraction_models.py`/`frame_extraction_errors.py`), not `src/cvip/common/` — it consumes Video Loader's `LoadResult`/`MatchVideoSource` directly, and every consumer already depends on `cvip.video` for that type regardless of where the extractor itself lives.
+
+**Still open** (Scene Detection's own concern — resolve during that module's `/speckit-plan`):
+- Whether PySceneDetect (Module 2's named technology, `scenedetect==0.6.1` per requirements.txt) can consume frames fed by this service, or whether it insists on opening the file itself via its own reader — if the latter, Module 2 either reimplements scene-cut detection directly on this service, or PySceneDetect's internal reader becomes a documented, deliberate exception to the "always use this service" rule.
 
 ### Module 2: Scene Detection
 - Technology: PySceneDetect + OpenCV
+- Input: frames from Module 1a's Frame Extraction Service — see Module 1a's open design question on reconciling this with PySceneDetect's own reader
 - Output: List of scene boundaries with timestamps
 
 ### Module 3: Replay Detection
 - Methods: Logo detection, scoreboard tracking, slow-mo
+- Input: frames from Module 1a's Frame Extraction Service, not direct OpenCV access
 - Output: Replay segments with start/end times
 - Target: Remove ≥90% replays
 
 ### Module 4: Scoreboard OCR
 - Technology: Tesseract OCR
-- Frequency: Every 1 second (fed by Module 1a's Frame Sampler)
+- Frequency: Every 1 second, requested from Module 1a's Frame Extraction Service via `config/default.yaml`'s `video.sample_fps`
 - Input: one sampled video frame, the configured scoreboard region (ROI), and that frame's timestamp
 - Extract: runs, wickets, overs, batter (striker), non-striker, bowler, run_rate
 - Configurable ROI via config file
@@ -109,6 +133,7 @@ Authoritative spec, plan, data model, and contract now live in [specs/001-video-
 ### Module 6: Fielding Detection
 - Events: Diving catch, running catch, boundary save, direct hit, etc.
 - Method: Lightweight CV heuristics (v1), future AI models
+- Input: frames from Module 1a's Frame Extraction Service (once built), not direct OpenCV access
 - Output: Store to database with confidence
 - **Status**: Deferred post-MVP — see Deferred Until Later, below, and [docs/RISK_REGISTER.md](../docs/RISK_REGISTER.md) R4
 
@@ -134,7 +159,7 @@ Authoritative spec, plan, data model, and contract now live in [specs/001-video-
 Not one of the numbered PRD modules, but a required component: the thing that actually sequences Modules 1 → 1a → 2 → 3 → 4 → 4a → 5 (and separately, 8 → 9), rather than that sequencing logic living inside the CLI layer (which would undermine Principle V's "independently testable" modules by making the CLI the de facto integration point for all nine modules).
 
 Responsibilities:
-- **`analyze` sequencing**: run Modules 1 → 1a → 2 → 3 → 4 → 4a → 5 in order, passing each module's output to the next per that module's contract; stop immediately on any module's failure (Principle VI).
+- **`analyze` sequencing**: run Modules 1 → 1a → 2 → 3 → 4 → 4a → 5 in order, passing each module's output to the next per that module's contract; stop immediately on any module's failure (Principle VI). Note Module 1a is a shared service Modules 2/3/4 each call into (with their own sampling rate), not a single one-shot step whose output only feeds Module 4.
 - **Single-Pass Analysis enforcement**: before running anything, check the `matches` table (see Database Schema) for an existing row with the candidate file's `file_hash` (from Video Loader); if found and `--force` was not passed, stop with exit code 9 (`cli.md`) rather than reprocessing.
 - **Match record lifecycle**: insert a `matches` row with `status = 'IN_PROGRESS'` before Module 2 begins, update to `'COMPLETE'` after Module 5 finishes successfully, or `'FAILED'` on error.
 - **Resume interrupted processing** (PRD Section 16, previously an orphaned requirement with no owner): if a prior `cvip analyze` run for this `file_hash` left a `matches` row with `status = 'IN_PROGRESS'` (i.e., the process died mid-run), the Orchestrator is what would detect this and either resume from the last completed module or require `--force` to restart cleanly. The exact resume granularity (per-module vs. full-restart) is a follow-up decision, not resolved here — but the Orchestrator, not any individual module, is where it belongs.
@@ -303,7 +328,7 @@ Constitution Principle IV and PRD Section 18 mandate ≥95% detection accuracy (
 | Module | Rough estimate | Basis |
 |---|---|---|
 | 1. Video Loader | ≤10s | SC-001, already measured-and-gated (`specs/001-video-loader/`) |
-| 1a. Frame Sampler | ~3-5 min | Decoding/seeking to ~12,600 sampled frames (1 FPS × 3.5h) |
+| 1a. Frame Extraction Service | ~3-5 min | Seeking to ~12,600 sampled frames (1 FPS × 3.5h) for OCR's rate. Scene Detection's likely denser/full-frame need is priced into Module 2's own row below as its own independent pass — no shared decode pass in v1 (decided, see Module 1a above), so this is not double-counted |
 | 2. Scene Detection | ~10-20 min | PySceneDetect content-aware detection over the full video |
 | 3. Replay Detection | ~2-5 min | Runs against the same sampled frames as 1a, not the full video |
 | 4. Scoreboard OCR | **~15-25 min** | ~12,600 Tesseract calls, one per sampled frame — **the single largest cost in the entire budget by a wide margin** |

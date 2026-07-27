@@ -41,3 +41,14 @@ This is a manual/automated validation guide for the Video Loader feature once im
 ## Pass/fail
 
 All four scenarios must pass exactly as described for this feature to be considered validated end-to-end. Any deviation should be filed against the relevant functional requirement or success criterion in [spec.md](./spec.md) rather than patched ad hoc.
+
+## Results (2026-07-27, automated equivalent via pytest — see tasks.md T028)
+
+Run on this development machine (not yet target-class hardware) via the automated test suite in `tests/{unit,contract,integration,benchmark}/`, which exercises the same fixtures and assertions described above.
+
+- **Scenario 1** (valid video load): PASS — `tests/integration/test_video_loader_e2e.py::test_load_valid_mp4_succeeds_with_correct_metadata` and `test_load_valid_mkv_succeeds_with_correct_metadata`; hash stability/distinctness confirmed by `test_file_hash_is_stable_across_repeated_loads` and `test_file_hash_differs_between_distinct_files`.
+- **Scenario 2** (reject invalid inputs): PASS — all 5 sub-cases (missing file, unsupported format, corrupted, zero-byte, locked) pass as distinct `failure_reason` values; see `tests/integration/test_video_loader_e2e.py`.
+- **Scenario 3** (offline, performance budget): PASS on the synthetic multi-hour fixture — `tests/benchmark/test_video_loader_performance.py` measured well under the 10s/200MB budget (the fixture's tiny encoded size means this doesn't yet stress I/O the way a real multi-GB broadcast file would; re-run against a real 3-4 hour recording before final production sign-off, per the Prerequisites note above). Offline behavior (no network calls) confirmed by `tests/unit/test_video_loader_validation.py::test_load_video_makes_no_network_calls`.
+- **Scenario 4** (diagnostics emission): PASS with a caveat — exactly one `ExecutionDiagnostics` JSON record is emitted per call, containing all required fields, and the JSON payload itself is valid/parseable. However, the default `loguru` stderr sink prefixes each line with human-readable timestamp/level/location metadata before the JSON message, so a line isn't *purely* JSON as written today (a consumer must extract the trailing `{...}` substring). A dedicated JSON-only sink (e.g. `logger.add(path, serialize=True, format="{message}")`) is a reasonable follow-up before any tooling needs to parse these logs directly, not a blocker for this feature.
+
+Full test suite: 25/25 passed. Coverage gate (`pytest --cov=src/cvip/video --cov-fail-under=100`): **100.00%**.

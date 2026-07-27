@@ -89,12 +89,12 @@ Authoritative spec, plan, data model, and contract now live in [specs/001-video-
 - **Shared decode pass**: decided against, for v1. Each caller (Scene Detection, Replay Detection, Scoreboard OCR) performs its own independent extraction request rather than sharing one broadcast decode pass — a true shared pass would need buffering/backpressure machinery this single-threaded, synchronous codebase has no precedent for. The Performance Targets budget below already priced Scene Detection's full-frame pass and this service's 1 FPS pass as *separate* line items, so this decision doesn't invalidate that budget — it's what the budget already assumed. Revisit only if the aggregate 40-minute budget proves too tight once Modules 2-4 are actually benchmarked.
 - **Module location**: `src/cvip/video/frame_extraction.py` (plus `frame_extraction_models.py`/`frame_extraction_errors.py`), not `src/cvip/common/` — it consumes Video Loader's `LoadResult`/`MatchVideoSource` directly, and every consumer already depends on `cvip.video` for that type regardless of where the extractor itself lives.
 
-**Still open** (Scene Detection's own concern — resolve during that module's `/speckit-plan`):
-- Whether PySceneDetect (Module 2's named technology, `scenedetect==0.6.1` per requirements.txt) can consume frames fed by this service, or whether it insists on opening the file itself via its own reader — if the latter, Module 2 either reimplements scene-cut detection directly on this service, or PySceneDetect's internal reader becomes a documented, deliberate exception to the "always use this service" rule.
+**Resolved during Scene Detection's own `/speckit-plan`** (`specs/003-scene-detection/research.md`):
+- **PySceneDetect integration**: no exception to "always use this service" is needed. PySceneDetect's high-level `SceneManager.detect_scenes()` convenience method does open its own reader, but each `SceneDetector` subclass (e.g., `ContentDetector`) independently exposes a per-frame `process_frame(frame_num, frame_img)` method that accepts externally-supplied frame data. Scene Detection drives that per-frame API directly, fed one frame at a time from this service's `FULL` sampling mode.
 
 ### Module 2: Scene Detection
 - Technology: PySceneDetect + OpenCV
-- Input: frames from Module 1a's Frame Extraction Service — see Module 1a's open design question on reconciling this with PySceneDetect's own reader
+- Input: frames from Module 1a's Frame Extraction Service, driven via PySceneDetect's per-frame detector API (`specs/003-scene-detection/research.md` Decision 1) — no exception to the "always use this service" rule
 - Output: List of scene boundaries with timestamps
 
 ### Module 3: Replay Detection

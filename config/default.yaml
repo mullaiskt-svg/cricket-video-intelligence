@@ -1,0 +1,51 @@
+# Bump config_version whenever a key is renamed or removed, so the app can detect
+# and warn about an old-format config file rather than silently misreading it.
+config_version: 1
+
+video:
+  sample_fps: 1
+  scene_threshold: 27.0
+
+ocr:
+  engine: tesseract
+  scoreboard_region:
+    x: 0.05
+    y: 0.82
+    width: 0.90
+    height: 0.15
+  preprocess:
+    grayscale: true
+    threshold: true
+    upscale: 2
+  min_confidence: 0.70
+
+replay:
+  confidence_threshold: 0.65
+  min_segment_seconds: 3
+  signals:
+    replay_logo_weight: 0.35
+    scoreboard_absence_weight: 0.20
+    motion_profile_weight: 0.20
+    transition_weight: 0.15
+    camera_angle_weight: 0.10
+
+events:
+  pre_roll_seconds: 8
+  post_roll_seconds: 12
+  merge_gap_seconds: 3
+  # Only event types Module 5 (Event Detection) can currently emit.
+  # Do NOT add HAT_TRICK, MATCH_WINNING_SHOT, RUN_OUT, CATCH, or GREAT_FIELDING
+  # back here until a dismissal-type/fielder-attribution data source is designed
+  # (see specs/technical_plan.md "Event Taxonomy & Detectability") -- their
+  # presence previously implied detectability the pipeline doesn't have.
+  ranking:
+    CENTURY: 95
+    WICKET: 95
+    SIX: 80
+    FIFTY: 75
+    TEAM_MILESTONE: 65
+    FOUR: 60
+
+output:
+  container: mp4
+  avoid_reencode: true

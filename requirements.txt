@@ -22,3 +22,6 @@ tqdm==4.66.1
 
 # Logging
 loguru==0.7.0
+
+# Diagnostics
+psutil==5.9.5

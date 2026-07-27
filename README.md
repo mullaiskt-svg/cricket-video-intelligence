@@ -26,7 +26,9 @@ An offline AI-powered platform that analyzes cricket match broadcasts once and g
 - [Product Requirements (PRD)](./docs/PRD.md)
 - [Technical Architecture](./specs/technical_plan.md)
 - [Feature Specifications](./specs/features.md)
-- [API Contracts](./contracts/)
+- [CLI Reference](./specs/cli.md)
+- [MVP Delivery Plan](./docs/MVP_PLAN.md)
+- Feature contracts live per-feature under `specs/<feature-name>/contracts/` (e.g., [specs/001-video-loader/contracts/](./specs/001-video-loader/contracts/)) — there is no single top-level contracts folder
 
 ## 🚀 Quick Start
 
@@ -66,25 +68,15 @@ specify init --here
 1. **Generate Tasks:** `claude /speckit.tasks`
 2. **Implement:** `claude /speckit.implement`
 3. **Test:** `pytest tests/`
-4. **Analyze Match:** `python -m src.analyzer input_video.mp4`
-5. **Generate Highlights:** `python -m src.highlight_generator --template match`
+4. **Check environment:** `cvip doctor`
+5. **Analyze Match:** `cvip analyze input_video.mp4 --config config/default.yaml`
+6. **Generate Highlights:** `cvip generate <match_id> --template match --output output/match_highlights.mp4`
+
+See [specs/cli.md](./specs/cli.md) for the full command reference.
 
 ## 📂 Directory Structure
 
-See docs/technical_plan.md for detailed architecture.
-
-
-## 🏗️ Development Phases
-
-| Phase | Description | Duration |
-|-------|-------------|----------|
-| 0 | Foundation & Setup | Week 1 |
-| 1 | Video Processing Core | Weeks 2-3 |
-| 2 | Detection Systems | Weeks 4-6 |
-| 3 | Event Ranking | Week 7 |
-| 4 | Clip Generation | Week 8 |
-| 5 | Highlight Templates | Week 9 |
-| 6 | Testing & Optimization | Week 10 |
+See [specs/technical_plan.md](./specs/technical_plan.md) for detailed architecture, and [docs/MVP_PLAN.md](./docs/MVP_PLAN.md) for the phased delivery plan.
 
 ## 🧪 Testing
 
@@ -95,16 +87,48 @@ pytest
 # Run with coverage
 pytest --cov=src tests/
 
-# Run specific module tests
-pytest tests/test_scene_detection.py
+# Run a specific module's tests, e.g. Video Loader
+pytest tests/unit/test_video_loader_validation.py
 ```
 
-## 📊 Success Metrics
+## 🔧 Development
 
-- Detection accuracy: ≥95% (fours, sixes, wickets)
-- Replay removal: ≥90%
-- Processing time: ≤40 min for 3-hour match
-- Memory usage: <6GB peak
+### Install Development Tools
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Run Tests
+
+```bash
+pytest tests/ -v --cov=src
+```
+
+### Code Style
+
+```bash
+black src/ tests/
+pylint src/
+```
+
+## 📊 Performance Targets
+
+| Metric | Target | Status |
+|--------|--------|--------|
+| Processing Time (3hr video) | ≤ 40 min | 🔄 TBD |
+| Memory Usage | < 6 GB | 🔄 TBD |
+| Event Detection | ≥ 95% | 🔄 TBD |
+| Replay Removal | ≥ 90% | 🔄 TBD |
+| Highlight Generation | < 2 min | 🔄 TBD |
+
+## 🎯 Success Criteria
+
+✅ Detect ≥95% of fours, sixes, wickets
+✅ Remove ≥90% of replay footage
+✅ Generate highlights without reprocessing
+✅ Process 3-hour match in ≤40 minutes
+✅ Run entirely offline on target hardware
 
 ## 🤝 Contributing
 
@@ -114,7 +138,15 @@ This is a personal project following Spec-Driven Development (SDD) methodology u
 
 Private project - All rights reserved.
 
+## 👥 Contributors
+
+- Mullais (mullais.kt@gmail.com)
+
+## 📞 Support
+
+For questions or issues, please create a GitHub issue.
+
 ---
 
-**Status:** 🚧 In Development (Phase 0)
-**Last Updated:** October 2025
+**Last Updated:** July 2026
+**Status:** Spec-Kit Initialization Phase

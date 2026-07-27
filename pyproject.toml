@@ -1,0 +1,29 @@
+[project]
+name = "cvip"
+version = "0.1.0"
+description = "Cricket Video Intelligence Platform - offline cricket match analysis and highlight generation"
+requires-python = ">=3.11"
+
+[project.scripts]
+cvip = "cvip.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/contract", "tests/integration", "tests/benchmark"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src/cvip"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+
+[tool.pylint.format]
+max-line-length = 100

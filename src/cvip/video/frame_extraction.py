@@ -111,9 +111,6 @@ class FrameExtractor:
         source = load_result.source
         self._progress.total_duration_seconds = source.duration_seconds
 
-        self._targets = self._resolve_targets(source)
-        self._progress.total_frames = len(self._targets)
-
         self._capture = cv2.VideoCapture(source.file_path)
         if not self._capture.isOpened():
             self._fail(
@@ -121,32 +118,71 @@ class FrameExtractor:
                 "Could not open source video for extraction",
             )
 
+        self._targets = self._resolve_targets(source)
+        self._progress.total_frames = len(self._targets)
+
     def _resolve_targets(self, source) -> List[int]:
         mode = self._request.mode
-        native_fps = source.frame_rate
         native_count = source.frame_count
+        needs_time_conversion = mode in (SamplingMode.FIXED_INTERVAL, SamplingMode.TIMESTAMP_LIST) or (
+            self._request.resume_from_frame_index is None
+            and self._request.resume_from_timestamp_seconds is not None
+        )
+        effective_fps = (
+            self._calibrate_effective_fps(source.frame_rate, native_count)
+            if needs_time_conversion
+            else source.frame_rate
+        )
 
         if mode == SamplingMode.FULL:
             targets = list(range(native_count))
         elif mode == SamplingMode.FIXED_INTERVAL:
-            targets = self._resolve_fixed_interval_targets(source)
+            targets = self._resolve_fixed_interval_targets(source, effective_fps)
         elif mode == SamplingMode.FRAME_LIST:
             targets = self._resolve_frame_list_targets(native_count)
         else:  # SamplingMode.TIMESTAMP_LIST -- the only remaining enum value
-            targets = self._resolve_timestamp_list_targets(source)
+            targets = self._resolve_timestamp_list_targets(source, effective_fps)
 
-        return self._apply_resume(targets, native_fps, native_count)
+        return self._apply_resume(targets, effective_fps, native_count)
 
-    def _resolve_fixed_interval_targets(self, source) -> List[int]:
+    def _actual_timestamp_at(self, frame_index: int) -> Optional[float]:
+        """Seek to `frame_index` and read back its real CAP_PROP_POS_MSEC,
+        without disturbing the extractor's own yielded-frame position
+        (`_retrieve_frame` always re-seeks explicitly before reading).
+        Returns None if the frame can't be decoded."""
+        self._capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        decoded, _ = self._capture.read()
+        if not decoded:
+            return None
+        return self._capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+
+    def _calibrate_effective_fps(self, native_fps: float, native_count: int) -> float:
+        """Two-point calibration correcting for the container's reported
+        average frame rate not matching the video's actual timing -- e.g. a
+        VFR source, which Video Loader does not reject. Probes the actual
+        decoded timestamps of the first and last frame and derives an
+        effective fps from them, at a fixed O(1) cost regardless of video
+        length. This corrects a systematic linear mismatch; genuine
+        frame-to-frame VFR jitter would need a full pre-scan to resolve
+        exactly, which research.md already ruled out on performance
+        grounds, so it remains a documented, accepted limitation."""
+        if native_count < 2 or native_fps <= 0:
+            return native_fps
+        first_ts = self._actual_timestamp_at(0)
+        last_ts = self._actual_timestamp_at(native_count - 1)
+        if first_ts is None or last_ts is None or last_ts <= first_ts:
+            return native_fps
+        return (native_count - 1) / (last_ts - first_ts)
+
+    def _resolve_fixed_interval_targets(self, source, effective_fps: float) -> List[int]:
         rate = self._request.rate_fps or 0.0
         if rate <= 0:
             return []
-        native_fps = source.frame_rate
         step_seconds = 1.0 / rate
         targets = []
         t = 0.0
         while t < source.duration_seconds:
-            idx = round(t * native_fps)
+            idx = round(t * effective_fps)
             if idx < source.frame_count:
                 targets.append(idx)
             t += step_seconds
@@ -166,9 +202,8 @@ class FrameExtractor:
             targets.append(idx)
         return sorted(targets)
 
-    def _resolve_timestamp_list_targets(self, source) -> List[int]:
+    def _resolve_timestamp_list_targets(self, source, effective_fps: float) -> List[int]:
         raw = self._request.timestamps_seconds or []
-        native_fps = source.frame_rate
         seen = set()
         targets = []
         for ts in raw:
@@ -177,17 +212,23 @@ class FrameExtractor:
                     f"timestamp {ts} out of range (0-{source.duration_seconds}), skipped"
                 )
                 continue
-            idx = max(0, min(round(ts * native_fps), source.frame_count - 1))
+            idx = max(0, min(round(ts * effective_fps), source.frame_count - 1))
             if idx in seen:
                 continue
             seen.add(idx)
             targets.append(idx)
         return sorted(targets)
 
-    def _apply_resume(self, targets: List[int], native_fps: float, native_count: int) -> List[int]:
+    def _apply_resume(self, targets: List[int], effective_fps: float, native_count: int) -> List[int]:
         resume_index = self._request.resume_from_frame_index
-        if resume_index is None and self._request.resume_from_timestamp_seconds is not None:
-            resume_index = round(self._request.resume_from_timestamp_seconds * native_fps)
+        resume_timestamp = self._request.resume_from_timestamp_seconds
+        if resume_index is None and resume_timestamp is not None:
+            if resume_timestamp < 0:
+                self._fail(
+                    ExtractionFailureReason.RESUME_POINT_OUT_OF_RANGE,
+                    f"resume point (timestamp {resume_timestamp}s) is outside the video's range (0+)",
+                )
+            resume_index = round(resume_timestamp * effective_fps)
 
         if resume_index is None:
             return targets

@@ -4,9 +4,11 @@ See specs/002-frame-extraction-service/spec.md FR-004, FR-011, FR-012.
 """
 
 import socket
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import cv2
 import numpy as np
 import pytest
 
@@ -248,6 +250,120 @@ def test_resume_from_timestamp_only_resolves_to_frame_index():
 
     expected_first_index = round(2.0 * load_result.source.frame_rate)
     assert frames[0].frame_index == expected_first_index
+
+
+def test_negative_resume_timestamp_is_rejected_not_silently_accepted():
+    """PR #2 review finding: a small negative timestamp (e.g. -0.01s at
+    25fps) rounds to frame 0 and must not silently slip past validation as
+    if it were a valid resume-from-the-start request."""
+    load_result = load_video(str(_require_fixture("valid_short.mp4")))
+    request = ExtractionRequest(
+        load_result=load_result, mode=SamplingMode.FULL, resume_from_timestamp_seconds=-0.01
+    )
+
+    with pytest.raises(ExtractionError) as exc_info:
+        with extract_frames(request) as extractor:
+            list(extractor)
+
+    assert exc_info.value.reason == ExtractionFailureReason.RESUME_POINT_OUT_OF_RANGE
+
+
+def test_effective_fps_is_calibrated_from_actual_frame_timestamps(mocker):
+    """PR #2 review finding: time-based sampling must not blindly trust the
+    container's average frame_rate when it disagrees with the video's
+    actual decoded timing (e.g. a VFR source, which Video Loader does not
+    reject) -- calibrate from the real first/last-frame timestamps instead."""
+    load_result = load_video(str(_require_fixture("valid_short.mp4")))
+    native_count = load_result.source.frame_count  # 125 at 25fps/5s
+
+    fake_frame = np.zeros((10, 10, 3), dtype="uint8")
+    state = {"pos": 0}
+
+    # Actual timing implies an effective fps of 20 (124 frames / 6.2s),
+    # not the reported native 25fps -- a deliberate mismatch.
+    actual_ms_by_index = {0: 0.0, native_count - 1: 6200.0}
+
+    def fake_set(prop, value):
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            state["pos"] = int(value)
+
+    def fake_read():
+        return True, fake_frame
+
+    def fake_get(prop):
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            return state["pos"] + 1
+        if prop == cv2.CAP_PROP_POS_MSEC:
+            return actual_ms_by_index.get(state["pos"], state["pos"] / 25.0 * 1000.0)
+        return 0.0
+
+    mock_capture = mock.MagicMock()
+    mock_capture.isOpened.return_value = True
+    mock_capture.set.side_effect = fake_set
+    mock_capture.read.side_effect = fake_read
+    mock_capture.get.side_effect = fake_get
+    mocker.patch("cv2.VideoCapture", return_value=mock_capture)
+
+    request = ExtractionRequest(load_result=load_result, mode=SamplingMode.FIXED_INTERVAL, rate_fps=1.0)
+    with extract_frames(request) as extractor:
+        frames = list(extractor)
+
+    # Calibrated (effective_fps=20): round(t*20) for t=0,1,2,3,4 -> 0,20,40,60,80.
+    # Uncalibrated (native_fps=25) would have produced 0,25,50,75,100 instead.
+    assert [ctx.frame_index for ctx in frames] == [0, 20, 40, 60, 80]
+
+
+def test_calibration_skipped_when_frame_count_below_two():
+    load_result = load_video(str(_require_fixture("valid_short.mp4")))
+    single_frame_source = replace(load_result.source, frame_count=1)
+    load_result = replace(load_result, source=single_frame_source)
+
+    request = ExtractionRequest(load_result=load_result, mode=SamplingMode.FIXED_INTERVAL, rate_fps=1.0)
+    with extract_frames(request) as extractor:
+        frames = list(extractor)
+
+    assert [ctx.frame_index for ctx in frames] == [0]
+
+
+def test_calibration_falls_back_to_native_fps_when_probe_frame_fails_to_decode(mocker):
+    load_result = load_video(str(_require_fixture("valid_short.mp4")))
+    native_count = load_result.source.frame_count
+    native_fps = load_result.source.frame_rate
+
+    fake_frame = np.zeros((10, 10, 3), dtype="uint8")
+    state = {"pos": 0, "calls": 0}
+
+    def fake_set(prop, value):
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            state["pos"] = int(value)
+
+    def fake_read():
+        state["calls"] += 1
+        if state["calls"] <= 2:  # the two calibration probes (frame 0, frame native_count-1)
+            return False, None
+        return True, fake_frame
+
+    def fake_get(prop):
+        if prop == cv2.CAP_PROP_POS_FRAMES:
+            return state["pos"] + 1
+        if prop == cv2.CAP_PROP_POS_MSEC:
+            return state["pos"] / native_fps * 1000.0
+        return 0.0
+
+    mock_capture = mock.MagicMock()
+    mock_capture.isOpened.return_value = True
+    mock_capture.set.side_effect = fake_set
+    mock_capture.read.side_effect = fake_read
+    mock_capture.get.side_effect = fake_get
+    mocker.patch("cv2.VideoCapture", return_value=mock_capture)
+
+    request = ExtractionRequest(load_result=load_result, mode=SamplingMode.FIXED_INTERVAL, rate_fps=1.0)
+    with extract_frames(request) as extractor:
+        frames = list(extractor)
+
+    # Falls back to native_fps (25): t=0,1,2,3,4 -> idx=0,25,50,75,100.
+    expected = sorted({round(t * native_fps) for t in range(5) if round(t * native_fps) < native_count})
+    assert [ctx.frame_index for ctx in frames] == expected
 
 
 def test_get_failure_after_successful_read_raises_source_unavailable(mocker):

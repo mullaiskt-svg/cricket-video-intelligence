@@ -263,6 +263,36 @@ def test_unexpected_processing_error_mid_run_raises_decode_failure_reason(mocker
     assert exc_info.value.reason == SceneDetectionFailureReason.DECODE_FAILURE_MID_RUN
 
 
+def test_diagnostics_preserve_partial_boundaries_on_mid_run_failure(mocker):
+    """Regression: a mid-run failure's diagnostics record must reflect
+    boundaries already classified before the failure, not report
+    boundaries_detected=0 for a run that actually found some (FR-015/FR-019
+    'summarizing the partial run')."""
+    from cvip.video.frame_extraction_errors import ExtractionError, ExtractionFailureReason
+
+    # segment_frames=10 -> cut at frame 10, window closes by frame 13
+    # (well before the injected failure at frame 15).
+    frames = _two_segment_frame_contexts(segment_frames=10)[:15]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(
+            frames, error=ExtractionError(ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN, "gone")
+        ),
+    )
+    emit_spy = mocker.patch("cvip.video.scene_detection.emit_diagnostics")
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with pytest.raises(SceneDetectionError):
+        with detect_scenes(request) as detector:
+            detector.run()
+
+    assert emit_spy.call_count == 1
+    diagnostics = emit_spy.call_args[0][0]
+    assert "boundaries_detected=1" in diagnostics.output_summary
+
+
 def test_decode_failure_mid_run_raises_specific_reason(mocker):
     from cvip.video.frame_extraction_errors import ExtractionError, ExtractionFailureReason
 

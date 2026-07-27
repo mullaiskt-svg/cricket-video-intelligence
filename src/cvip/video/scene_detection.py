@@ -6,6 +6,7 @@ for the full contract this module implements.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
@@ -40,6 +41,16 @@ CONFIGURATION_VERSION = 1
 POST_CUT_WINDOW = 3
 RAMP_ELEVATED_FRACTION = 0.25
 RAMP_MIN_ELEVATED_FRAMES = 2
+
+# How many recent (frame_index -> timestamp) pairs to retain. SceneDetector's
+# general process_frame() contract permits a detector to report a cut frame
+# other than the one just passed in (e.g. a buffering detector reporting a
+# fade's start once its end is seen) -- ContentDetector itself never does
+# this in practice (verified against its implementation: it always returns
+# either [] or exactly [frame_num]), but this buffer is kept as a defensive
+# safety net against that general contract rather than relying on knowledge
+# of one specific detector's internals.
+RECENT_TIMESTAMP_BUFFER_SIZE = 32
 
 _ExtractionFailureToSceneDetectionFailure = {
     ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN: SceneDetectionFailureReason.SOURCE_UNAVAILABLE_MID_RUN,
@@ -122,6 +133,7 @@ class SceneDetector:
         pending: List[Dict[str, Any]] = []
         raw_boundaries: List[Tuple[float, BoundaryType, float]] = []
         last_frame = None
+        recent_timestamps: "OrderedDict[int, float]" = OrderedDict()
 
         try:
             extraction_request = ExtractionRequest(load_result=load_result, mode=SamplingMode.FULL)
@@ -131,6 +143,10 @@ class SceneDetector:
                         break
                     self._frames_analyzed += 1
                     score = self._frame_diff_score(last_frame, frame_context.frame)
+
+                    recent_timestamps[frame_context.frame_index] = frame_context.timestamp_seconds
+                    if len(recent_timestamps) > RECENT_TIMESTAMP_BUFFER_SIZE:
+                        recent_timestamps.popitem(last=False)
 
                     # Feed this frame's score to boundaries pending from
                     # earlier frames (before adding any new pending boundary
@@ -145,21 +161,32 @@ class SceneDetector:
                             still_pending.append(pending_boundary)
                     pending = still_pending
 
+                    # process_frame()'s general contract permits it to report
+                    # a cut frame other than the current one (a buffering
+                    # detector) and more than one at once -- look each one up
+                    # by its own frame index rather than assuming it's always
+                    # frame_context's own (research.md Decision 1 notes this
+                    # doesn't happen for ContentDetector specifically, but
+                    # this loop doesn't rely on that).
                     cut_frame_numbers = content_detector.process_frame(
                         frame_context.frame_index, frame_context.frame
                     )
-                    if cut_frame_numbers and not pending:
-                        # A cut detected while an earlier one's post-cut
-                        # window is still open is treated as part of the
-                        # same transition (e.g. a multi-frame wipe/flicker),
-                        # not a separate boundary -- avoiding a burst of
-                        # near-duplicate boundaries for one visual effect.
-                        # A cut occurring after the window has already
-                        # closed (POST_CUT_WINDOW frames later) still
-                        # starts its own new pending boundary.
+                    for cut_frame_num in cut_frame_numbers:
+                        if pending:
+                            # A cut detected while an earlier one's post-cut
+                            # window is still open is treated as part of the
+                            # same transition (e.g. a multi-frame wipe/
+                            # flicker), not a separate boundary -- avoiding a
+                            # burst of near-duplicate boundaries for one
+                            # visual effect. A cut occurring after the window
+                            # has already closed (POST_CUT_WINDOW frames
+                            # later) still starts its own new pending
+                            # boundary.
+                            continue
+                        cut_timestamp = recent_timestamps.get(cut_frame_num, frame_context.timestamp_seconds)
                         pending.append(
                             {
-                                "timestamp": frame_context.timestamp_seconds,
+                                "timestamp": cut_timestamp,
                                 "cut_score": score,
                                 "post_scores": [],
                             }
@@ -171,6 +198,7 @@ class SceneDetector:
                     # across the next loop iteration.
                     last_frame = frame_context.frame.copy()
         except ExtractionError as exc:
+            self._boundaries = self._finalize_boundaries(raw_boundaries, pending)
             reason = _ExtractionFailureToSceneDetectionFailure.get(
                 exc.reason, SceneDetectionFailureReason.SOURCE_UNAVAILABLE_MID_RUN
             )
@@ -180,18 +208,10 @@ class SceneDetector:
             # decoded frame (e.g. a shape mismatch reaching cv2.absdiff or
             # PySceneDetect's internal HSV conversion) must still surface as
             # this module's own typed failure (FR-018), not an untyped crash.
+            self._boundaries = self._finalize_boundaries(raw_boundaries, pending)
             self._fail(SceneDetectionFailureReason.DECODE_FAILURE_MID_RUN, str(exc))
 
-        # Flush any still-pending boundaries (end of stream or cancellation
-        # reached before their post-cut window filled up).
-        for pending_boundary in pending:
-            raw_boundaries.append(self._classify(pending_boundary))
-
-        raw_boundaries.sort(key=lambda item: item[0])
-        self._boundaries = [
-            SceneBoundary(boundary_id=index, timestamp_seconds=ts, boundary_type=boundary_type, confidence=confidence)
-            for index, (ts, boundary_type, confidence) in enumerate(raw_boundaries)
-        ]
+        self._boundaries = self._finalize_boundaries(raw_boundaries, pending)
 
         self._finished = True
         self._finish()
@@ -209,6 +229,26 @@ class SceneDetector:
         )
 
     # -- internal ------------------------------------------------------
+
+    def _finalize_boundaries(
+        self,
+        raw_boundaries: List[Tuple[float, BoundaryType, float]],
+        pending: List[Dict[str, Any]],
+    ) -> List[SceneBoundary]:
+        """Flush any still-open pending boundaries (their post-cut window
+        didn't fully fill before the run ended -- normally, cancelled, or
+        failed) and finalize the ordered, ID-assigned boundary list. Called
+        both on normal completion and before a mid-run failure's diagnostics
+        are built, so a failure's diagnostics correctly reflect whatever was
+        actually detected before the failure, not an empty list."""
+        for pending_boundary in pending:
+            raw_boundaries.append(self._classify(pending_boundary))
+
+        raw_boundaries.sort(key=lambda item: item[0])
+        return [
+            SceneBoundary(boundary_id=index, timestamp_seconds=ts, boundary_type=boundary_type, confidence=confidence)
+            for index, (ts, boundary_type, confidence) in enumerate(raw_boundaries)
+        ]
 
     def _frame_diff_score(self, last_frame, current_frame) -> float:
         """A simple, independent frame-to-frame difference signal (mean

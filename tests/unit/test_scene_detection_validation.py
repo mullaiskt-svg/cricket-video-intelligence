@@ -102,6 +102,40 @@ def test_cut_near_end_of_stream_is_still_flushed_and_classified(mocker):
         assert boundary.confidence is not None
 
 
+def test_cut_frame_number_other_than_current_uses_correct_timestamp(mocker):
+    """Regression: SceneDetector's general process_frame() contract permits
+    reporting a cut frame other than the current one (a buffering detector)
+    -- ContentDetector itself never does this in practice, but the lookup
+    must use the reported frame's own timestamp, not blindly the current
+    frame's, in case a different detector or library version ever did."""
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / 25.0, frame=_solid_frame(0))
+        for i in range(10)
+    ]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frames),
+    )
+
+    mock_detector_instance = mocker.MagicMock()
+
+    def fake_process_frame(frame_num, frame_img):
+        # Report a cut at frame 3 while the loop is actually on frame 5.
+        return [3] if frame_num == 5 else []
+
+    mock_detector_instance.process_frame.side_effect = fake_process_frame
+    mocker.patch("cvip.video.scene_detection.ContentDetector", return_value=mock_detector_instance)
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with detect_scenes(request) as detector:
+        result = detector.run()
+
+    assert len(result.boundaries) == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(3 / 25.0)
+
+
 def test_boundary_ids_are_unique_within_a_result(mocker):
     frames = _three_segment_frame_contexts(segment_frames=40)
     mocker.patch(

@@ -22,6 +22,9 @@ ocr:
 replay:
   confidence_threshold: 0.65
   min_segment_seconds: 3
+  # Optional reference image for the replay-logo/bumper-graphic signal (specs/004-replay-detection/).
+  # When unset, that one signal always scores 0.0 rather than blocking detection.
+  logo_template_path: null
   signals:
     replay_logo_weight: 0.35
     scoreboard_absence_weight: 0.20

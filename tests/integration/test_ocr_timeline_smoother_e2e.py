@@ -207,3 +207,19 @@ def test_repeated_runs_produce_identical_output_sequences():
         second_result = runner.run()
 
     assert first_result.samples == second_result.samples
+
+
+# --- Codex P2 finding: duplicate timestamps should be rejected -----------
+
+
+def test_duplicate_timestamps_rejected_before_any_sample(mocker):
+    emit_spy = mocker.patch("cvip.video.ocr_timeline_smoother.emit_diagnostics")
+    samples = [_usable(0.0, runs=10), _usable(1.0, runs=10), _usable(1.0, runs=20)]
+    request = _request(samples)
+
+    with pytest.raises(OCRTimelineSmootherError) as exc_info:
+        with smooth_timeline(request) as runner:
+            runner.run()
+
+    assert exc_info.value.reason == OCRTimelineSmootherFailureReason.INVALID_INPUT
+    assert emit_spy.call_count == 1

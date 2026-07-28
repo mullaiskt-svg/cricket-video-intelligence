@@ -303,3 +303,29 @@ def test_diagnostics_reflect_zero_samples_processed_on_rejected_input(mocker):
     assert emit_spy.call_count == 1
     output_summary = emit_spy.call_args[0][0].output_summary
     assert "samples_processed=0" in output_summary
+
+
+# --- Codex P2 finding: partial OCR samples should not seed known_good -----
+
+
+def test_partial_ocr_sample_without_core_tuple_does_not_seed_known_good():
+    # A sample with some fields (batter) but missing core scoring fields
+    # (runs/over_number) should not update known_good, to avoid leaving
+    # mid-timeline nulls in the cleaned output (Codex review finding).
+    partial_sample = _sample(
+        0.0,
+        runs=None,  # missing
+        wickets=0,  # present
+        over_number=None,  # missing
+        ball_in_over=None,  # missing
+        batter="Smith*",  # present, but alone is not enough to seed known_good
+    )
+    full_sample = _usable(1.0, runs=10, ball_in_over=3)
+    result = _run([partial_sample, full_sample], outlier_window=2)
+
+    # The partial sample passes through with its own None fields.
+    assert result.samples[0].runs is None
+    assert result.samples[0].batter == "Smith*"
+    # The full sample is then the first to update known_good.
+    assert result.samples[1].runs == 10
+    assert result.samples[1].batter == "Smith*"

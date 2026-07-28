@@ -78,6 +78,19 @@ def test_out_of_order_timestamps_yields_invalid_input_before_processing():
     assert exc_info.value.reason == OCRTimelineSmootherFailureReason.INVALID_INPUT
 
 
+def test_duplicate_timestamps_yields_invalid_input_before_processing():
+    samples = [_sample(0.0), _sample(1.0), _sample(1.0), _sample(2.0)]
+    request = OCRTimelineSmootherRequest(
+        scoreboard_ocr_result=_result(samples), outlier_window=2
+    )
+
+    with pytest.raises(OCRTimelineSmootherError) as exc_info:
+        with smooth_timeline(request) as runner:
+            runner.run()
+
+    assert exc_info.value.reason == OCRTimelineSmootherFailureReason.INVALID_INPUT
+
+
 def test_non_positive_outlier_window_yields_invalid_smoothing_configuration():
     request = OCRTimelineSmootherRequest(
         scoreboard_ocr_result=_result([_sample(0.0)]), outlier_window=0

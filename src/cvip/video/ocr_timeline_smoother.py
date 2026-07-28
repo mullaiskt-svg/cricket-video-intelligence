@@ -136,7 +136,11 @@ class OCRTimelineSmootherRunner:
             else:
                 resolution = SmoothingResolution.PASSED_THROUGH
                 fields = self._sample_fields(sample)
-                known_good = fields
+                # Only update known_good if all core scoring fields are present --
+                # partial OCR readings (e.g., has batter but runs/over/ball are None)
+                # should not seed known_good, to avoid mid-timeline nulls in output.
+                if all(fields.get(f) is not None for f in _CORE_TUPLE_FIELDS):
+                    known_good = fields
 
             samples.append(self._build_cleaned_sample(sample.timestamp_seconds, fields))
             evidence_list.append(SmoothingEvidence(resolution=resolution, original_sample=sample))
@@ -165,10 +169,10 @@ class OCRTimelineSmootherRunner:
 
         previous_timestamp: Optional[float] = None
         for sample in samples:
-            if previous_timestamp is not None and sample.timestamp_seconds < previous_timestamp:
+            if previous_timestamp is not None and sample.timestamp_seconds <= previous_timestamp:
                 self._fail(
                     OCRTimelineSmootherFailureReason.INVALID_INPUT,
-                    "scoreboard_ocr_result.samples is not an ascending-timestamp-ordered sequence",
+                    "scoreboard_ocr_result.samples is not a strictly ascending-timestamp-ordered sequence",
                 )
             previous_timestamp = sample.timestamp_seconds
 

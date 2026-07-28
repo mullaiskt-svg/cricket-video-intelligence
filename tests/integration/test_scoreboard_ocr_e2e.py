@@ -280,6 +280,50 @@ def test_malformed_roi_rejected_with_one_diagnostics(mocker):
     assert emit_spy.call_count == 1
 
 
+@pytest.mark.parametrize(
+    "region",
+    [None, (0.1, 0.1, 0.5), (0.1, 0.1, 0.5, "0.5"), ("a", "b", "c", "d")],
+    ids=["none", "wrong-length", "non-numeric-element", "all-non-numeric"],
+)
+def test_structurally_malformed_roi_rejected_not_crashed(mocker, region):
+    """PR review finding: a malformed (not merely out-of-bounds) ROI --
+    None, wrong length, or non-numeric elements -- must still fail with
+    INVALID_OCR_CONFIGURATION, not an untyped TypeError/ValueError."""
+    load_result = _dummy_load_result(duration_seconds=5.0)
+    mock_extract = mocker.patch("cvip.video.scoreboard_ocr.extract_frames")
+    emit_spy = mocker.patch("cvip.video.scoreboard_ocr.emit_diagnostics")
+
+    request = _make_request(load_result, scoreboard_region=region)
+
+    with pytest.raises(ScoreboardOcrError) as exc_info:
+        with extract_scoreboard(request) as extractor:
+            extractor.run()
+
+    assert exc_info.value.reason == ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION
+    mock_extract.assert_not_called()
+    assert emit_spy.call_count == 1
+
+
+@pytest.mark.parametrize("field_name", ["preprocess_grayscale", "preprocess_threshold"])
+def test_non_boolean_preprocessing_flag_rejected_with_one_diagnostics(mocker, field_name):
+    """PR review finding: a truthy-but-non-boolean preprocessing flag (e.g.
+    the string "false") must be rejected rather than silently running a
+    different pipeline than the caller actually requested."""
+    load_result = _dummy_load_result(duration_seconds=5.0)
+    mock_extract = mocker.patch("cvip.video.scoreboard_ocr.extract_frames")
+    emit_spy = mocker.patch("cvip.video.scoreboard_ocr.emit_diagnostics")
+
+    request = _make_request(load_result, **{field_name: "false"})
+
+    with pytest.raises(ScoreboardOcrError) as exc_info:
+        with extract_scoreboard(request) as extractor:
+            extractor.run()
+
+    assert exc_info.value.reason == ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION
+    mock_extract.assert_not_called()
+    assert emit_spy.call_count == 1
+
+
 def test_non_positive_integer_upscale_rejected_with_one_diagnostics(mocker):
     load_result = _dummy_load_result(duration_seconds=5.0)
     mock_extract = mocker.patch("cvip.video.scoreboard_ocr.extract_frames")

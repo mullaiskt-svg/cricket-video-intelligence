@@ -260,21 +260,34 @@ class ScoreboardOcrExtractor:
 
     def _validate_configuration(self) -> None:
         request = self._request
-        x, y, w, h = request.scoreboard_region
-        values_finite = all(math.isfinite(v) for v in (x, y, w, h))
-        roi_in_bounds = (
-            values_finite
-            and 0.0 <= x <= 1.0
-            and 0.0 <= y <= 1.0
-            and w > 0.0
-            and h > 0.0
-            and x + w <= 1.0 + 1e-9
-            and y + h <= 1.0 + 1e-9
+        region = request.scoreboard_region
+
+        # Validate shape/types before destructuring or calling math.isfinite
+        # on them -- a malformed region (None, wrong length, non-numeric
+        # elements) must fail with our own typed reason, not an untyped
+        # TypeError/ValueError escaping before _fail() ever runs.
+        is_numeric_quadruple = (
+            isinstance(region, tuple)
+            and len(region) == 4
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in region)
         )
+        roi_in_bounds = False
+        if is_numeric_quadruple:
+            x, y, w, h = region
+            values_finite = all(math.isfinite(v) for v in (x, y, w, h))
+            roi_in_bounds = (
+                values_finite
+                and 0.0 <= x <= 1.0
+                and 0.0 <= y <= 1.0
+                and w > 0.0
+                and h > 0.0
+                and x + w <= 1.0 + 1e-9
+                and y + h <= 1.0 + 1e-9
+            )
         if not roi_in_bounds:
             self._fail(
                 ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION,
-                f"scoreboard_region {request.scoreboard_region} is out of bounds",
+                f"scoreboard_region {region!r} must be a 4-tuple of finite numbers describing an in-bounds ROI",
             )
 
         upscale = request.preprocess_upscale
@@ -284,11 +297,26 @@ class ScoreboardOcrExtractor:
                 f"preprocess_upscale {upscale} must be a positive integer",
             )
 
-        min_confidence = request.min_confidence
-        if not (math.isfinite(min_confidence) and 0.0 <= min_confidence <= 1.0):
+        if not isinstance(request.preprocess_grayscale, bool):
             self._fail(
                 ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION,
-                f"min_confidence {min_confidence} must be within [0.0, 1.0]",
+                f"preprocess_grayscale {request.preprocess_grayscale!r} must be a boolean",
+            )
+        if not isinstance(request.preprocess_threshold, bool):
+            self._fail(
+                ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION,
+                f"preprocess_threshold {request.preprocess_threshold!r} must be a boolean",
+            )
+
+        min_confidence = request.min_confidence
+        if (
+            isinstance(min_confidence, bool)
+            or not isinstance(min_confidence, (int, float))
+            or not (math.isfinite(min_confidence) and 0.0 <= min_confidence <= 1.0)
+        ):
+            self._fail(
+                ScoreboardOcrFailureReason.INVALID_OCR_CONFIGURATION,
+                f"min_confidence {min_confidence!r} must be a number within [0.0, 1.0]",
             )
 
     # -- internal: per-frame ROI extraction and preprocessing --------------
@@ -459,6 +487,19 @@ class ScoreboardOcrExtractor:
                 over_number is not None
                 and baseline.over_number is not None
                 and over_number < baseline.over_number
+            ):
+                return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+            # Within the *same* over, ball_in_over must not go backwards
+            # either (e.g. baseline "12.5" followed by a noisy "12.3") --
+            # an over_number-only check misses this, since it only compares
+            # across an over boundary, never within one (PR review finding).
+            if (
+                over_number is not None
+                and baseline.over_number is not None
+                and over_number == baseline.over_number
+                and ball_in_over is not None
+                and baseline.ball_in_over is not None
+                and ball_in_over < baseline.ball_in_over
             ):
                 return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
 

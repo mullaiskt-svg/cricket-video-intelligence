@@ -272,6 +272,49 @@ def test_over_number_decreased_yields_invalid_over_sequence_reason():
     assert reason == ValidationFailureReason.INVALID_OVER_SEQUENCE
 
 
+def test_ball_in_over_regression_within_the_same_over_is_rejected():
+    """PR review finding: over_number staying the same while ball_in_over
+    goes backwards (e.g. "12.5" followed by a noisy "12.3") is an
+    impossible sequence within a single over -- over_number alone not
+    decreasing must not be enough to accept it."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=50, wickets=2, over_number=12, ball_in_over=5)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 51, "wickets": 2, "over_number": 12, "ball_in_over": 3}, baseline
+    )
+
+    assert passed is False
+    assert reason == ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+
+def test_ball_in_over_advancing_within_the_same_over_is_accepted():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=50, wickets=2, over_number=12, ball_in_over=3)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 51, "wickets": 2, "over_number": 12, "ball_in_over": 5}, baseline
+    )
+
+    assert passed is True
+    assert reason is None
+
+
+def test_ball_in_over_reset_on_a_new_over_is_accepted():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=50, wickets=2, over_number=12, ball_in_over=5)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 51, "wickets": 2, "over_number": 13, "ball_in_over": 1}, baseline
+    )
+
+    assert passed is True
+    assert reason is None
+
+
 # --- FR-014: innings-transition heuristic ------------------------------------
 
 

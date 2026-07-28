@@ -24,6 +24,9 @@ markers = [
 ]
 
 [tool.coverage.run]
+# source = ["src/cvip"] covers every subpackage, including src/cvip/events/
+# (Event Detection, specs/007-event-detection/) -- no change needed when adding
+# a new subpackage here.
 source = ["src/cvip"]
 
 [tool.black]

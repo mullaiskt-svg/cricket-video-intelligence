@@ -414,6 +414,57 @@ def test_mismatched_scene_detection_result_rejected_with_one_diagnostics(mocker)
     assert emit_spy.call_count == 1
 
 
+def test_malformed_boundaries_list_rejected_with_one_diagnostics(mocker):
+    """PR review finding: a SceneDetectionResult that matches this video's
+    source_video_id but has a malformed boundary list (here, `boundaries`
+    itself is None) must still be rejected with
+    INVALID_SCENE_DETECTION_RESULT before any frame is processed, rather
+    than reaching _build_candidate_segments() and raising an untyped
+    exception."""
+    load_result = _dummy_load_result(duration_seconds=20.0)
+    scene_result = SceneDetectionResult(source_video_id=load_result.source.file_hash, boundaries=None)
+    mock_extract = mocker.patch("cvip.video.replay_detection.extract_frames")
+    emit_spy = mocker.patch("cvip.video.replay_detection.emit_diagnostics")
+
+    request = _make_request(load_result, scene_result)
+
+    with pytest.raises(ReplayDetectionError) as exc_info:
+        with detect_replays(request) as detector:
+            detector.run()
+
+    assert exc_info.value.reason == ReplayDetectionFailureReason.INVALID_SCENE_DETECTION_RESULT
+    mock_extract.assert_not_called()
+    assert emit_spy.call_count == 1
+
+
+def test_malformed_boundary_entry_rejected_with_one_diagnostics(mocker):
+    """PR review finding: a boundary entry missing a valid timestamp is
+    malformed, not just a missing/mismatched result -- must also be
+    rejected with INVALID_SCENE_DETECTION_RESULT."""
+
+    class _BrokenBoundary:
+        boundary_type = BoundaryType.ORDINARY_CUT
+        confidence = 0.9
+        # deliberately no timestamp_seconds attribute at all
+
+    load_result = _dummy_load_result(duration_seconds=20.0)
+    scene_result = SceneDetectionResult(
+        source_video_id=load_result.source.file_hash, boundaries=[_BrokenBoundary()]
+    )
+    mock_extract = mocker.patch("cvip.video.replay_detection.extract_frames")
+    emit_spy = mocker.patch("cvip.video.replay_detection.emit_diagnostics")
+
+    request = _make_request(load_result, scene_result)
+
+    with pytest.raises(ReplayDetectionError) as exc_info:
+        with detect_replays(request) as detector:
+            detector.run()
+
+    assert exc_info.value.reason == ReplayDetectionFailureReason.INVALID_SCENE_DETECTION_RESULT
+    mock_extract.assert_not_called()
+    assert emit_spy.call_count == 1
+
+
 # --- US3: invalid configuration, each independently, one diagnostics record -
 
 
@@ -521,3 +572,47 @@ def test_cancel_mid_detection_stops_cleanly_and_emits_once(mocker):
     # only replay-eligible segment (which starts at 50s) is never reached.
     assert result.segments == ()
     assert emit_spy.call_count == 1
+
+
+def test_cancel_inside_an_open_segment_truncates_reported_end_not_full_span(mocker):
+    """PR review finding: cancelling partway through an in-flight candidate
+    segment must not report the segment's full, original [start, end) span
+    -- the footage after the cancellation point was never analyzed and must
+    not be claimed as observed replay content. Mirrors the review's own
+    example: a [50, 200) candidate cancelled at 60s must not be reported as
+    ending at 200s."""
+    boundary = SceneBoundary(
+        boundary_id=0, timestamp_seconds=50.0, boundary_type=BoundaryType.REPLAY_TRANSITION, confidence=1.0
+    )
+    load_result = _dummy_load_result(duration_seconds=200.0)
+    scene_result = SceneDetectionResult(source_video_id=load_result.source.file_hash, boundaries=[boundary])
+    frames = _one_fps_frames(200.0)
+    detector_holder = {}
+
+    def frame_generator():
+        for idx, frame_context in enumerate(frames):
+            yield frame_context
+            if idx == 60:  # last yielded frame has timestamp_seconds == 60.0
+                detector_holder["detector"].cancel()
+
+    mocker.patch(
+        "cvip.video.replay_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frame_generator()),
+    )
+
+    request = _make_request(load_result, scene_result, weights=TRANSITION_HEAVY_WEIGHTS)
+
+    with detect_replays(request) as detector:
+        detector_holder["detector"] = detector
+        result = detector.run()
+
+    for segment in result.segments:
+        assert segment.end_seconds <= 60.0, (
+            f"segment end_seconds={segment.end_seconds} claims footage past the 60s "
+            "cancellation point as observed replay content"
+        )
+    # The [50, 200) candidate's combined confidence (transition-heavy
+    # weights, REPLAY_TRANSITION leading boundary) clears the threshold even
+    # from partial evidence, so it should still be reported -- just
+    # truncated to what was actually observed, not silently dropped.
+    assert any(s.start_seconds == pytest.approx(50.0) and s.end_seconds == pytest.approx(60.0) for s in result.segments)

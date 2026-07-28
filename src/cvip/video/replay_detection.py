@@ -164,13 +164,14 @@ class ReplayDetector:
         self._validate_configuration()
 
         scene_result = self._request.scene_detection_result
-        if scene_result is None or scene_result.source_video_id != source.file_hash:
+        if not self._is_valid_scene_result(scene_result, source.file_hash):
             self._fail(
                 ReplayDetectionFailureReason.INVALID_SCENE_DETECTION_RESULT,
-                "Scene Detection result is missing or does not correspond to this video",
+                "Scene Detection result is missing, malformed, or does not correspond to this video",
             )
 
         candidate_segments = self._build_candidate_segments(scene_result, source.duration_seconds)
+        template_gray = self._load_logo_template(self._request.logo_template_path)
 
         baseline = LiveActionBaselineTracker()
         finalized: List[Tuple[float, float, ReplayEvidence]] = []
@@ -178,6 +179,8 @@ class ReplayDetector:
         seg_index = 0
         current_accum: Optional[Dict[str, Any]] = None
         last_frame = None
+        last_timestamp: Optional[float] = None
+        stopped_early = False
 
         try:
             extraction_request = ExtractionRequest(
@@ -186,6 +189,7 @@ class ReplayDetector:
             with extract_frames(extraction_request) as extractor:
                 for frame_context in extractor:
                     if self._cancelled:
+                        stopped_early = True
                         break
                     self._frames_analyzed += 1
 
@@ -208,12 +212,16 @@ class ReplayDetector:
                             frame_context.frame,
                             last_frame,
                             self._request.scoreboard_region,
-                            self._request.logo_template_path,
+                            template_gray,
                         )
 
                     last_frame = frame_context.frame.copy()
+                    last_timestamp = frame_context.timestamp_seconds
         except ExtractionError as exc:
-            self._flush_remaining_segments(candidate_segments, seg_index, current_accum, baseline, finalized)
+            stopped_early = True
+            self._flush_remaining_segments(
+                candidate_segments, seg_index, current_accum, baseline, finalized, last_timestamp
+            )
             self._segments = self._finalize_result_segments(finalized)
             reason = _ExtractionFailureToReplayDetectionFailure.get(
                 exc.reason, ReplayDetectionFailureReason.SOURCE_UNAVAILABLE_MID_RUN
@@ -223,11 +231,21 @@ class ReplayDetector:
             # unexpected failure while processing an otherwise-successfully-
             # decoded frame must still surface as this module's own typed
             # failure (FR-022), not an untyped crash.
-            self._flush_remaining_segments(candidate_segments, seg_index, current_accum, baseline, finalized)
+            stopped_early = True
+            self._flush_remaining_segments(
+                candidate_segments, seg_index, current_accum, baseline, finalized, last_timestamp
+            )
             self._segments = self._finalize_result_segments(finalized)
             self._fail(ReplayDetectionFailureReason.DECODE_FAILURE_MID_RUN, str(exc))
 
-        self._flush_remaining_segments(candidate_segments, seg_index, current_accum, baseline, finalized)
+        self._flush_remaining_segments(
+            candidate_segments,
+            seg_index,
+            current_accum,
+            baseline,
+            finalized,
+            last_timestamp if stopped_early else None,
+        )
         self._segments = self._finalize_result_segments(finalized)
 
         self._finished = True
@@ -267,6 +285,32 @@ class ReplayDetector:
                 ReplayDetectionFailureReason.INVALID_REPLAY_CONFIGURATION,
                 f"min_segment_seconds {request.min_segment_seconds} must be finite and non-negative",
             )
+
+    def _is_valid_scene_result(self, scene_result, source_file_hash: str) -> bool:
+        """FR-002: a Scene Detection result is only usable if it corresponds
+        to this video AND its boundary list is well-formed -- a matching but
+        malformed result (e.g. `boundaries=None`, or a boundary missing a
+        finite `timestamp_seconds`/valid `boundary_type`/in-range
+        `confidence`) must still be rejected with
+        `INVALID_SCENE_DETECTION_RESULT` rather than reaching
+        `_build_candidate_segments()` and raising an untyped exception."""
+        if scene_result is None or scene_result.source_video_id != source_file_hash:
+            return False
+        boundaries = scene_result.boundaries
+        if boundaries is None:
+            return False
+        for boundary in boundaries:
+            timestamp = getattr(boundary, "timestamp_seconds", None)
+            if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp):
+                return False
+            if not isinstance(getattr(boundary, "boundary_type", None), BoundaryType):
+                return False
+            confidence = getattr(boundary, "confidence", None)
+            if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                return False
+            if not math.isfinite(confidence) or not (0.0 <= confidence <= 1.0):
+                return False
+        return True
 
     # -- internal: candidate segment construction -------------------------
 
@@ -308,10 +352,10 @@ class ReplayDetector:
         frame,
         prev_frame,
         scoreboard_region: Tuple[float, float, float, float],
-        logo_template_path: Optional[str],
+        template_gray: Optional[np.ndarray],
     ) -> None:
         accum["frame_count"] += 1
-        accum["logo_scores"].append(self._logo_match_score(frame, logo_template_path))
+        accum["logo_scores"].append(self._logo_match_score(frame, template_gray))
         accum["scoreboard_raw"].append(self._scoreboard_content_signal(frame, scoreboard_region))
         accum["motion_raw"].append(self._frame_diff_magnitude(prev_frame, frame))
 
@@ -321,20 +365,28 @@ class ReplayDetector:
         else:
             accum["fingerprint_sum"] = accum["fingerprint_sum"] + fingerprint
 
-    def _logo_match_score(self, frame, logo_template_path: Optional[str]) -> float:
-        """OpenCV template matching against the optional configured
-        template (research.md); always 0.0 when no template is configured
-        (FR-015)."""
+    def _load_logo_template(self, logo_template_path: Optional[str]) -> Optional[np.ndarray]:
+        """Load and grayscale the optional configured logo template exactly
+        once per run (FR-015) -- re-reading/decoding the same image from disk
+        on every one of a multi-hour match's ~12,600 sampled frames would be
+        pure waste, since the template never changes mid-run."""
         if not logo_template_path:
-            return 0.0
+            return None
         template = cv2.imread(logo_template_path)
         if template is None:
+            return None
+        return cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) if template.ndim == 3 else template
+
+    def _logo_match_score(self, frame, template_gray: Optional[np.ndarray]) -> float:
+        """OpenCV template matching against the optional configured,
+        pre-loaded template (research.md); always 0.0 when no template is
+        configured or it failed to load (FR-015)."""
+        if template_gray is None:
             return 0.0
         gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
-        gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY) if template.ndim == 3 else template
-        if gray_template.shape[0] > gray_frame.shape[0] or gray_template.shape[1] > gray_frame.shape[1]:
+        if template_gray.shape[0] > gray_frame.shape[0] or template_gray.shape[1] > gray_frame.shape[1]:
             return 0.0
-        result = cv2.matchTemplate(gray_frame, gray_template, cv2.TM_CCOEFF_NORMED)
+        result = cv2.matchTemplate(gray_frame, template_gray, cv2.TM_CCOEFF_NORMED)
         return max(0.0, min(1.0, float(result.max())))
 
     def _scoreboard_content_signal(self, frame, region: Tuple[float, float, float, float]) -> float:
@@ -471,6 +523,7 @@ class ReplayDetector:
         current_accum: Optional[Dict[str, Any]],
         baseline: LiveActionBaselineTracker,
         finalized: List[Tuple[float, float, ReplayEvidence]],
+        truncate_end_to: Optional[float] = None,
     ) -> None:
         """Finalize only the single candidate segment that was in flight when
         frame processing stopped (normal end-of-stream, cancellation, or
@@ -481,9 +534,22 @@ class ReplayDetector:
         risk reporting a "replay" for footage that was never actually
         analyzed, particularly on early cancellation (research.md; this is
         the reason this method processes at most one segment, not every
-        remaining one)."""
-        if seg_index < len(candidate_segments):
-            self._finalize_segment(candidate_segments[seg_index], current_accum, baseline, finalized)
+        remaining one).
+
+        `truncate_end_to` is the timestamp of the last frame actually
+        observed before an early (cancelled or failed) stop -- when set, the
+        in-flight segment's reported `end` is clamped to it, so a segment
+        like [50, 200) cancelled at 60s is reported (if at all) as ending at
+        60s, not 200s: the footage from 60-200s was never analyzed and must
+        not be claimed as observed replay content. `None` on a normal
+        end-of-stream completion, where the segment's own designed end is
+        already the true, fully-observed boundary."""
+        if seg_index >= len(candidate_segments):
+            return
+        start, end, leading_boundary = candidate_segments[seg_index]
+        if truncate_end_to is not None and truncate_end_to < end:
+            end = max(start, truncate_end_to)
+        self._finalize_segment((start, end, leading_boundary), current_accum, baseline, finalized)
 
     def _finalize_result_segments(
         self, finalized: List[Tuple[float, float, ReplayEvidence]]

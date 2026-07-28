@@ -159,12 +159,18 @@ def test_logo_score_is_zero_when_no_template_configured():
     assert detector._logo_match_score(frame, None) == 0.0
 
 
-def test_logo_score_is_zero_when_template_path_does_not_load(tmp_path):
+def test_load_logo_template_is_none_when_not_configured():
     detector = _make_detector()
-    frame = _solid_frame(128)
+
+    assert detector._load_logo_template(None) is None
+    assert detector._load_logo_template("") is None
+
+
+def test_load_logo_template_is_none_when_path_does_not_load(tmp_path):
+    detector = _make_detector()
     missing_path = str(tmp_path / "does_not_exist.png")
 
-    assert detector._logo_match_score(frame, missing_path) == 0.0
+    assert detector._load_logo_template(missing_path) is None
 
 
 def test_logo_score_is_zero_when_template_larger_than_frame(tmp_path):
@@ -172,8 +178,9 @@ def test_logo_score_is_zero_when_template_larger_than_frame(tmp_path):
     frame = _solid_frame(128, size=(16, 16, 3))
     template_path = tmp_path / "template.png"
     cv2.imwrite(str(template_path), _solid_frame(200, size=(32, 32, 3)))
+    template_gray = detector._load_logo_template(str(template_path))
 
-    assert detector._logo_match_score(frame, str(template_path)) == 0.0
+    assert detector._logo_match_score(frame, template_gray) == 0.0
 
 
 def _gradient_frame(size=(32, 32, 3)) -> np.ndarray:
@@ -193,10 +200,43 @@ def test_logo_score_reflects_a_genuine_template_match(tmp_path):
     # best-match location, unlike a solid-color frame/template pair (whose
     # normalized cross-correlation is mathematically undefined, 0/0).
     cv2.imwrite(str(template_path), frame[0:8, 0:8, :])
+    template_gray = detector._load_logo_template(str(template_path))
 
-    score = detector._logo_match_score(frame, str(template_path))
+    score = detector._logo_match_score(frame, template_gray)
 
     assert score == pytest.approx(1.0, abs=1e-2)
+
+
+def test_logo_template_is_loaded_once_per_run_not_per_frame(mocker):
+    """Regression: re-reading/decoding the same template image from disk on
+    every one of a multi-hour match's ~12,600 sampled frames would be pure
+    waste (PR review finding) -- the template must be loaded once before the
+    frame loop, not inside the per-frame accumulation path."""
+    load_result = _dummy_load_result(duration_seconds=5.0)
+    scene_result = SceneDetectionResult(source_video_id=load_result.source.file_hash)
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=float(i), frame=_solid_frame(0))
+        for i in range(5)
+    ]
+    mocker.patch("cvip.video.replay_detection.extract_frames", return_value=_FakeFrameExtractor(frames))
+    load_spy = mocker.patch(
+        "cvip.video.replay_detection.ReplayDetector._load_logo_template", return_value=None
+    )
+
+    request = ReplayDetectionRequest(
+        load_result=load_result,
+        scene_detection_result=scene_result,
+        confidence_threshold=0.65,
+        min_segment_seconds=3.0,
+        scoreboard_region=(0.0, 0.0, 0.2, 0.1),
+        logo_template_path="some/template.png",
+        **DEFAULT_WEIGHTS,
+    )
+
+    with detect_replays(request) as detector:
+        detector.run()
+
+    load_spy.assert_called_once_with("some/template.png")
 
 
 # --- FR-008: degenerate scoreboard ROI -----------------------------------
@@ -235,6 +275,76 @@ def test_zero_length_candidate_segment_from_duplicate_boundary_is_skipped():
     # zero-length first segment, which must be skipped rather than reported.
     assert all(end > start for start, end, _ in segments)
     assert segments == [(0.0, 10.0, boundary_at_start)]
+
+
+# --- FR-002: malformed Scene Detection results, each field independently ---
+
+
+def test_scene_result_valid_when_well_formed():
+    detector = _make_detector()
+    boundary = SceneBoundary(
+        boundary_id=0, timestamp_seconds=1.0, boundary_type=BoundaryType.ORDINARY_CUT, confidence=0.9
+    )
+    scene_result = SceneDetectionResult(source_video_id="deadbeef", boundaries=[boundary])
+
+    assert detector._is_valid_scene_result(scene_result, "deadbeef") is True
+
+
+def test_scene_result_invalid_when_boundaries_is_none():
+    detector = _make_detector()
+    scene_result = SceneDetectionResult(source_video_id="deadbeef", boundaries=None)
+
+    assert detector._is_valid_scene_result(scene_result, "deadbeef") is False
+
+
+def test_scene_result_invalid_when_boundary_type_is_not_a_boundary_type():
+    class _Broken:
+        timestamp_seconds = 1.0
+        boundary_type = "REPLAY_TRANSITION"  # a string, not the BoundaryType enum
+        confidence = 0.9
+
+    detector = _make_detector()
+    scene_result = SceneDetectionResult(source_video_id="deadbeef", boundaries=[_Broken()])
+
+    assert detector._is_valid_scene_result(scene_result, "deadbeef") is False
+
+
+def test_scene_result_invalid_when_confidence_is_not_numeric():
+    class _Broken:
+        timestamp_seconds = 1.0
+        boundary_type = BoundaryType.ORDINARY_CUT
+        confidence = "high"
+
+    detector = _make_detector()
+    scene_result = SceneDetectionResult(source_video_id="deadbeef", boundaries=[_Broken()])
+
+    assert detector._is_valid_scene_result(scene_result, "deadbeef") is False
+
+
+def test_scene_result_invalid_when_confidence_out_of_range():
+    class _Broken:
+        timestamp_seconds = 1.0
+        boundary_type = BoundaryType.ORDINARY_CUT
+        confidence = 1.5
+
+    detector = _make_detector()
+    scene_result = SceneDetectionResult(source_video_id="deadbeef", boundaries=[_Broken()])
+
+    assert detector._is_valid_scene_result(scene_result, "deadbeef") is False
+
+
+# --- Empty candidate-segment list (e.g. a zero-duration video) ---------------
+
+
+def test_flush_on_empty_candidate_segments_is_a_no_op():
+    """A zero-duration video (or any input producing no candidate segments
+    at all) must not raise -- flushing simply has nothing to finalize."""
+    detector = _make_detector()
+    finalized = []
+
+    detector._flush_remaining_segments([], 0, None, LiveActionBaselineTracker(), finalized)
+
+    assert finalized == []
 
 
 # --- Mid-run failure: an unexpected processing error still maps to a typed -

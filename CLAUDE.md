@@ -13,20 +13,21 @@ Constitution (`.specify/memory/constitution.md`) > `docs/PRD.md` > `specs/techni
 - Windows 11 desktop, CPU-only, fully offline
 
 ## Package Layout
-One top-level package, `src/cvip/`, with one subpackage per pipeline concern (not one package per feature):
-`src/cvip/{video, ocr, replay, events, db, clips, templates, config, common}/`. `common/` holds cross-cutting infrastructure (`diagnostics.py`) shared by every module. See `specs/001-video-loader/plan.md` Project Structure for the pattern to follow when adding a new subpackage.
+One top-level package, `src/cvip/`. In practice, every module that consumes frames via the Frame Extraction Service or otherwise sits in the frame-analysis pipeline (Video Loader through the OCR Timeline Smoother — Modules 1, 1a, 2, 3, 4, 4a) lives together in `src/cvip/video/`, one file-set per module (`<module>.py`, `<module>_models.py`, `<module>_errors.py`), rather than one subpackage per module — this avoids awkward cross-package imports between tightly-coupled pipeline stages (e.g., Replay Detection consuming Scene Detection's result type, the OCR Timeline Smoother consuming Scoreboard OCR's). `common/` holds cross-cutting infrastructure (`diagnostics.py`) shared by every module. A later module that *isn't* part of this frame-analysis chain (Event Detection, Event Ranking, Clip Generator, Video Stitcher) should get its own subpackage per its own concern (`events/`, `clips/`, etc.) rather than also being folded into `video/` — see `specs/001-video-loader/plan.md` Project Structure for the pattern to follow when adding a new subpackage.
+
+(Superseded: an earlier version of this section listed `{video, ocr, replay, events, db, clips, templates, config, common}` as separate one-subpackage-per-concern directories. Modules 3 and 4 were both placed in `video/` instead of dedicated `replay/`/`ocr/` packages, and Module 4a followed the same precedent — this section now documents that actual, intentional convention rather than the original aspirational one.)
 
 ## Pipeline Modules
 See `specs/technical_plan.md` for full detail; summary:
 
 | # | Module | Status |
 |---|---|---|
-| 1 | Video Loader | Fully spec'd: `specs/001-video-loader/` (spec/plan/tasks/data-model/contract) — ready to implement |
-| 1a | Frame Sampler (1 FPS, MVP addition) | Architecture-level only |
-| 2 | Scene Detection (PySceneDetect + OpenCV) | Architecture-level only |
-| 3 | Replay Detection | Architecture-level only |
-| 4 | Scoreboard OCR (Tesseract) | Architecture-level only |
-| 4a | OCR Timeline Smoother (MVP addition) | Architecture-level only |
+| 1 | Video Loader | Implemented and merged: `specs/001-video-loader/`, `src/cvip/video/loader.py` |
+| 1a | Frame Extraction Service (1 FPS, MVP addition) | Implemented and merged: `specs/002-frame-extraction-service/`, `src/cvip/video/frame_extraction.py` |
+| 2 | Scene Detection (PySceneDetect + OpenCV) | Implemented and merged: `specs/003-scene-detection/`, `src/cvip/video/scene_detection.py` |
+| 3 | Replay Detection | Implemented and merged: `specs/004-replay-detection/`, `src/cvip/video/replay_detection.py` |
+| 4 | Scoreboard OCR (Tesseract) | Implemented and merged: `specs/005-scoreboard-ocr/`, `src/cvip/video/scoreboard_ocr.py` |
+| 4a | OCR Timeline Smoother (MVP addition) | In progress: `specs/006-ocr-timeline-smoother/` |
 | 5 | Event Detection | Architecture-level only; **see below before starting** |
 | 6 | Fielding Detection | Deferred post-MVP (`docs/RISK_REGISTER.md` R4) |
 | 7 | Event Ranking | Values live in `config/default.yaml`, not duplicated elsewhere |

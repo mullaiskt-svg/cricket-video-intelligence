@@ -11,6 +11,8 @@ import pytest
 from cvip.video.loader import load_video
 from cvip.video.models import LoadStatus
 
+pytestmark = pytest.mark.benchmark
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_loader"
 SC_001_MAX_SECONDS = 10.0
 SC_005_MAX_MEMORY_MB = 200.0

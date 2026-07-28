@@ -13,6 +13,8 @@ from cvip.video.frame_extraction_models import ExtractionRequest, SamplingMode
 from cvip.video.loader import load_video
 from cvip.video.models import LoadStatus
 
+pytestmark = pytest.mark.benchmark
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_loader"
 SC_002_MAX_MEMORY_MB = 150.0
 

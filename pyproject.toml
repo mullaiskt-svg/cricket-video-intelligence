@@ -13,6 +13,15 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/contract", "tests/integration", "tests/benchmark"]
 pythonpath = ["src"]
+# Benchmark tests (tests/benchmark/) are real-time/real-memory measurements
+# against multi-hour synthetic fixtures and take tens of minutes combined --
+# deselected by default so `pytest` and the coverage gate stay fast. Run them
+# explicitly with `pytest -m benchmark` (the trailing -m on the command line
+# overrides this addopts default, it does not combine with it).
+addopts = '--strict-markers -m "not benchmark"'
+markers = [
+    "benchmark: slow, real-fixture performance/throughput/memory-regression tests (deselected by default; run explicitly with `pytest -m benchmark`)",
+]
 
 [tool.coverage.run]
 source = ["src/cvip"]

@@ -1,0 +1,168 @@
+# Feature Specification: Replay Detection
+
+**Feature Branch**: `004-replay-detection`
+
+**Created**: 2026-07-28
+
+**Status**: Draft
+
+**Input**: User description: "Replay Detection: analyzes a validated cricket match video, using Scene Detection's (Module 2) boundary list as input alongside its own frame analysis, and produces an ordered list of replay segments (start/end timestamps) -- broadcast replay footage that must be excluded from generated highlights by default (PRD: \"Replay segments should be indexed but excluded from generated highlights unless explicitly requested\"), and cross-referenced by Event Detection (Module 5) to flag which detected events fall inside a replay so they aren't double-counted against live action. Unlike Scene Detection, this feature's output must persist beyond a single `cvip analyze` run (Clip Generator, Module 8, runs in a later, separate `generate` command per the CLI's two-phase design) -- it maps to the existing `replays` table in the database schema (specs/technical_plan.md), which will need a compatibility review since its current `detection_method` column (a 3-value enum: logo/scoreboard/slowmo) doesn't match the actual weighted multi-signal design already locked in at config/default.yaml's `replay` section. That config already defines five independently-weighted signals summing to 1.0 -- replay_logo_weight (0.35), scoreboard_absence_weight (0.20), motion_profile_weight (0.20), transition_weight (0.15), camera_angle_weight (0.10) -- combined into one overall confidence per candidate segment, thresholded against confidence_threshold (0.65), with candidate segments shorter than min_segment_seconds (3s) not treated as replays. The transition_weight signal is satisfied entirely by consuming Scene Detection's REPLAY_TRANSITION boundary classifications and confidence scores directly (per Scene Detection's own contract) -- this feature must not redetect transitions itself, that would duplicate Module 2's work. The other four signals require this feature's own detection logic: replay logo/bumper graphic presence (broadcasters overlay a distinct graphic during replay playback), scoreboard absence (the on-screen scoreboard graphic is typically hidden during a replay) -- critically, this must be a lightweight visual presence/absence check against the configured scoreboard ROI (config/default.yaml's ocr.scoreboard_region), NOT a dependency on Scoreboard OCR (Module 4), which runs later in the pipeline sequence (1 -> 1a -> 2 -> 3 -> 4) and is therefore unavailable as an input to Module 3; motion profile (replays are commonly shown in slow-motion, a detectable frame-to-frame motion-speed characteristic); and camera angle (replay footage often uses a distinct camera framing from live-action coverage). Must consume frames exclusively through the Frame Extraction Service (Module 1a), like every other computer-vision module on this platform. Must meet the constitution's >=90% replay-removal accuracy target (a platform-level, not necessarily per-signal, requirement) and attach a confidence score to every detected replay segment. Must run fully offline, CPU-only, within the platform's ~2-5 minute budget share noted in specs/technical_plan.md's Performance Targets table (itself an open question this feature's own planning phase should verify against motion-profile detection's actual sampling-density needs, since a 1-second sampling rate sufficient for the other three signals may be too coarse to characterize motion speed accurately -- resolve this tension during /speckit-plan, not here). Must emit the platform's standardized one-record-per-run execution diagnostics, and follow the same fail-fast, specific-reason philosophy as every other module on this platform."
+
+## Clarifications
+
+### Session 2026-07-28
+
+- Q: Should per-signal contributions be tracked internally, beyond the public confidence score? → A: Yes — an internal `Replay Evidence` record per candidate segment, capturing each of the five signals' individual scores alongside the combined confidence, kept for diagnostics, explainability, and future weight tuning even though the public segment output only exposes the combined value.
+- Q: Should misconfigured signal weights be allowed through? → A: No — weights MUST be validated to sum to 1.0 (within a small tolerance) at configuration time, and an invalid configuration MUST be rejected before any frame is processed, not silently normalized or ignored.
+- Q: Should diagnostics report more than pass/fail counts? → A: Yes — a fixed, enumerated set of operational metrics (segments evaluated/accepted/rejected, confidence statistics, duration statistics, sampling rate used, processing duration), matching how Scene Detection's own diagnostics field list was made concrete rather than open-ended.
+- Q: Should "five signals" be locked in as a hard ceiling? → A: No — reworded to make clear v1 evaluates five, but the architecture must not preclude adding more in the future (e.g., audio cues, broadcast graphics, commentary, DRS overlays) without rewriting this contract.
+- Q: Who owns turning signal evidence into a replay/not-replay decision? → A: Exclusively this feature. Downstream modules consume its confidence and segment output as-is; they must not recompute replay classification with their own thresholds.
+- Q: What breaks the tie when two segments share the same start timestamp? → A: Ascending end timestamp, then stable input order — making repeated-run ordering fully deterministic, not just "ordered by start time."
+- Q: Should segments carry a stable identifier? → A: Yes — a `replay_id`, unique within a detection run, mirroring Scene Detection's `boundary_id` precedent, so downstream modules can reference a specific segment without repeated timestamp matching.
+- Q: Should failure reasons stay generic? → A: No — an explicit, enumerated failure taxonomy (five values) replaces the generic "fail fast with a specific reason" wording, consistent with how every other module on this platform names its own taxonomy directly in its FRs.
+- Q: Does the still-undecided sampling strategy (deferred to `/speckit-plan`) need to meet any behavioral bar regardless of what's chosen? → A: Yes — whatever strategy is selected must itself be deterministic, so FR-024's determinism guarantee holds regardless of the eventual sampling decision.
+- Q: How is a segment-level score derived from potentially many sampled frames within a candidate segment, for the four signals this feature computes itself? → A: The mean (average) of that signal's per-frame score across every frame sampled within the segment — not a peak/maximum or majority-vote alternative. Three of the four self-computed signals (scoreboard-absence, motion-profile, camera-angle) are expected to hold consistently for the whole duration of a genuine replay, so averaging rewards that consistency and resists noisy single-frame outliers, while a brief logo flash still contributes proportional credit rather than being ignored or treated as a hard gate.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Detect and score candidate replay segments (Priority: P1)
+
+A pipeline run needs to know which stretches of a match video are broadcast replay footage rather than live action, so that highlights can exclude them by default and so later modules can tell whether a detected event happened live or in a replay.
+
+**Why this priority**: This is the entire reason the feature exists. Without a scored segment list, nothing downstream (Event Detection, Clip Generator) has anything to check against.
+
+**Independent Test**: Can be fully tested by running replay detection against a validated video containing a known replay segment (bracketed by a Scene Detection `REPLAY_TRANSITION` boundary) alongside a segment carrying strong non-transition replay signals (e.g., a configured logo template visible, and the scoreboard region absent), and confirming both are reported as replay segments with a combined confidence reflecting the weighted signals that fired.
+
+**Acceptance Scenarios**:
+
+1. **Given** a validated match video and its Scene Detection result, **When** replay detection runs, **Then** it produces an ordered (by start time, then end time, then stable input order for exact ties) list of replay segments, each with a stable `replay_id`, a start timestamp, an end timestamp, and a combined confidence score.
+2. **Given** a candidate segment whose combined weighted confidence meets or exceeds the configured threshold, **When** replay detection evaluates it, **Then** it is reported as a replay segment.
+3. **Given** a candidate segment whose combined weighted confidence falls below the configured threshold, **When** replay detection evaluates it, **Then** it is not reported as a replay segment — including a segment Scene Detection flagged as a `REPLAY_TRANSITION` boundary, if the other signals disagree strongly enough to pull the combined confidence below threshold (the transition signal is one weighted input, not an automatic override).
+4. **Given** a candidate segment shorter than the configured minimum duration, **When** replay detection evaluates it, **Then** it is not reported as a replay segment, regardless of its combined confidence.
+5. **Given** a video with no replay footage at all, **When** replay detection runs, **Then** it produces an empty segment list rather than failing or fabricating a segment.
+6. **Given** a video that has not been successfully validated (no successful `LoadResult`), **When** replay detection is requested, **Then** it refuses and does not attempt to read the file.
+
+---
+
+### User Story 2 - Produce a segment list usable across the analyze/generate workflow (Priority: P2)
+
+An operator runs `cvip analyze` once, then runs `cvip generate` in a later, separate invocation (potentially a different session entirely) to produce highlight clips. Clip Generator, at that later point, needs to know which stretches of the match were replays without re-running replay detection.
+
+**Why this priority**: This is what distinguishes this feature's output shape from Scene Detection's (which only needs to live for one `cvip analyze` run) — but it builds on User Story 1's segment list rather than being useful on its own.
+
+**Independent Test**: Can be fully tested by confirming the detection result's shape carries everything a later, separate process would need to reconstruct which video seconds are replays, without requiring any state from the detection run itself still being in memory.
+
+**Acceptance Scenarios**:
+
+1. **Given** a completed detection run, **When** its result is inspected, **Then** every replay segment's `replay_id`, start/end timestamps, and confidence are self-contained values (not references to in-memory objects from the run), suitable for handing to a persistence layer that outlives this process.
+2. **Given** a completed detection run, **When** its result is inspected, **Then** it also includes enough source-video identification (matching Video Loader's/Scene Detection's own identifier convention) that a later `cvip generate` invocation can confirm the segments belong to the video it's currently working with.
+3. **Given** a completed detection run's segments, **When** a downstream module (Event Detection, Clip Generator) consumes them, **Then** it treats the reported confidence and replay/not-replay classification as final — it does not recompute classification using a different threshold or reinterpret the underlying signal evidence itself.
+
+---
+
+### User Story 3 - Complete within budget, and follow platform-standard operational behavior (Priority: P3)
+
+An operator runs replay detection as part of analyzing a full 3-4 hour match. It completes within its allotted share of the overall analysis budget, fails fast with a specific reason if it cannot proceed, and produces the same standardized diagnostics record every other module does.
+
+**Why this priority**: A hard platform constraint and consistency expectation that must hold before this module can be trusted as a pipeline stage — but it is a property of User Story 1 operating at real-world scale and within the platform's established operational conventions, not a new detection capability of its own.
+
+**Independent Test**: Can be fully tested by running detection against a full-length (3-4 hour) validated video and confirming elapsed time stays within budget; separately, by forcing each of the taxonomy's failure conditions and confirming the matching specific reason is raised along with exactly one diagnostics record; separately, by confirming a malformed configuration (weights not summing to 1.0) is rejected before any frame is processed.
+
+**Acceptance Scenarios**:
+
+1. **Given** a 3-4 hour match video, **When** replay detection runs, **Then** it completes within its allotted share of the overall analysis budget (`specs/technical_plan.md` Performance Targets).
+2. **Given** a match video, **When** replay detection runs, **Then** the video is decoded no more than once during the run (consistent with the platform's single-pass principle), using a sampling strategy that is itself deterministic.
+3. **Given** the underlying video becomes unavailable partway through detection, **When** this occurs, **Then** the run fails fast with the specific `SOURCE_UNAVAILABLE_MID_RUN` reason rather than silently returning an incomplete or empty segment list as if it were genuine.
+4. **Given** a configuration whose signal weights do not sum to 1.0, **When** replay detection is requested, **Then** it is rejected immediately with `INVALID_REPLAY_CONFIGURATION`, before any frame is processed.
+5. **Given** a Scene Detection result that is missing, malformed, or does not correspond to the video being analyzed, **When** replay detection is requested, **Then** it is rejected immediately with `INVALID_SCENE_DETECTION_RESULT`.
+6. **Given** any detection run (successful, failed, or empty), **When** it completes, **Then** exactly one diagnostics record is emitted summarizing the run.
+
+### Out of Scope
+
+- Determining whether a detected event is worth including in a highlight, or how a replay segment should be presented if a user explicitly requests replay footage be included. This feature only detects and scores *which video seconds are replay footage* — decisions about what to do with that information belong to Event Detection (Module 5) and Clip Generator (Module 8).
+- Re-detecting scene or camera-transition boundaries. This feature consumes Scene Detection's (Module 2) `REPLAY_TRANSITION` boundary classifications and confidence scores directly as one of its five weighted signals; it does not run its own independent transition analysis.
+- Reading or interpreting scoreboard text. The scoreboard-absence signal only checks whether the configured scoreboard region visually looks occupied or empty — it never depends on Scoreboard OCR (Module 4), which is unavailable to this feature given the pipeline's module ordering (Module 3 runs before Module 4).
+- Writing to the database. Like every other module on this platform, this feature returns an in-memory result; persisting it to the `replays` table is the Pipeline Orchestrator's responsibility, not this feature's.
+- Re-deciding replay classification downstream. This feature is the sole owner of converting signal evidence into a replay confidence and classification; no other module recomputes or overrides that decision with its own threshold (US2 Acceptance Scenario 3).
+
+### Edge Cases
+
+- What happens when no replay-logo template is configured for a broadcast? — Resolved: the logo-presence signal contributes zero confidence in that case rather than failing the run; the other four signals still combine normally (see Assumptions).
+- What happens when the configured scoreboard region itself is invalid (e.g., outside the frame)? — Resolved: consistent with Scoreboard OCR's own documented handling of an undetectable region, this is treated as "region absent" for this signal's purposes, not a hard failure.
+- What happens when Scene Detection flags a boundary as `REPLAY_TRANSITION` but the other four signals strongly disagree? — Resolved: the combined weighted confidence still governs; a single strong signal does not override the others (US1 Acceptance Scenario 3).
+- What happens when two candidate replay segments are directly adjacent or overlapping? — Resolved: candidate segment boundaries come from Scene Detection's boundary list, which already guarantees no duplicate or overlapping boundaries; adjacent candidate segments are evaluated and reported independently.
+- What happens when two reported replay segments share the same start timestamp? — Resolved: ordered by ascending end timestamp next, then by stable input order, so ordering is fully deterministic rather than merely "sorted by start time" (US1 Acceptance Scenario 1).
+- What happens when a replay segment appears at the very start or end of the video, without a full bracketing pair of transitions? — Resolved: a candidate segment is still formed using the video's own start/end as the missing boundary, and evaluated normally.
+- What happens when a candidate segment is shorter than the configured minimum duration? — Resolved: excluded regardless of confidence (US1 Acceptance Scenario 4).
+- What happens when the configured signal weights don't sum to 1.0? — Resolved: rejected immediately with `INVALID_REPLAY_CONFIGURATION`, before any frame is processed (US3 Acceptance Scenario 4).
+- What happens when the supplied Scene Detection result doesn't correspond to the video being analyzed, or is otherwise malformed? — Resolved: rejected immediately with `INVALID_SCENE_DETECTION_RESULT` (US3 Acceptance Scenario 5).
+- What happens when the underlying video becomes unavailable partway through detection? — Resolved: fails fast with the specific `SOURCE_UNAVAILABLE_MID_RUN` reason (US3 Acceptance Scenario 3), consistent with every other module on this platform.
+- What happens when a video has no replay footage at all? — Resolved: an empty segment list is a valid, non-error outcome (US1 Acceptance Scenario 5).
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: System MUST accept a successful `LoadResult` (from the Video Loader feature) as input and MUST NOT accept a raw file path directly, nor attempt its own file validation.
+- **FR-002**: System MUST accept a Scene Detection result (the boundary list from Module 2) as a required input alongside the validated video.
+- **FR-003**: System MUST NOT produce any replay segments for a `LoadResult` that does not indicate a successful, validated video.
+- **FR-004**: System MUST source the frames it analyzes through the Frame Extraction Service (Module 1a), consistent with every other computer-vision module on this platform.
+- **FR-005**: System MUST derive candidate replay segment boundaries from Scene Detection's boundary list, rather than fabricating segment start/end points independently.
+- **FR-006**: System MUST evaluate five independently-weighted signals per candidate segment in this version: replay-logo/bumper-graphic presence, scoreboard-region absence, motion profile (slow-motion characteristic), Scene Detection's transition classification, and camera-angle difference from recent live-action framing. The signal-evaluation architecture MUST NOT preclude adding further signals in a future version (e.g., audio cues, broadcast graphics, commentary, DRS overlays) without requiring a rewrite of this contract.
+- **FR-007**: For the transition signal, system MUST directly reuse Scene Detection's `REPLAY_TRANSITION` classification and confidence for the relevant boundary and MUST NOT independently redetect scene transitions.
+- **FR-008**: For the scoreboard-absence signal, system MUST rely only on a visual presence/absence check of the configured scoreboard region and MUST NOT depend on Scoreboard OCR's output.
+- **FR-009**: System MUST combine the currently-evaluated signals into one overall confidence per candidate segment using their configured weights, and MUST support the weights being configurable rather than hardcoded.
+- **FR-010**: System MUST validate the configured signal weights, threshold, and minimum segment duration before processing any frame — weights MUST sum to 1.0 (within a small tolerance), and the threshold and minimum duration MUST each be finite, non-negative values within a sane range (e.g., threshold within [0.0, 1.0]) — and MUST reject an invalid configuration with `INVALID_REPLAY_CONFIGURATION` rather than silently normalizing, clamping, or ignoring the discrepancy.
+- **FR-011**: System MUST report a candidate segment as a replay segment only when its combined confidence meets or exceeds a configurable threshold.
+- **FR-012**: System MUST exclude a candidate segment from the reported results if its duration is shorter than a configurable minimum, regardless of its combined confidence.
+- **FR-013**: System MUST report a confidence score alongside every reported replay segment — never absent.
+- **FR-014**: Each reported replay segment MUST carry a stable identifier (`replay_id`), unique within its detection run, for downstream referencing without repeated timestamp matching — mirroring Scene Detection's `boundary_id` precedent.
+- **FR-015**: System MUST NOT fail the entire detection run because the logo-presence signal has no configured template to match against — that signal contributes zero confidence in that case, and detection proceeds using the remaining signals.
+- **FR-016**: System MUST produce a list of replay segments covering the full duration of the video; an empty list is a valid outcome for a video with no replay footage.
+- **FR-017**: The reported segment list MUST be self-contained (`replay_id`, start/end timestamps, confidence, and a source-video identifier consistent with the platform's existing identifier convention) such that a separate, later process can consume it without any in-memory state from the detection run itself.
+- **FR-018**: The reported segment list MUST be strictly ordered by ascending start timestamp; when two segments share the same start timestamp, ordering MUST fall back to ascending end timestamp, then to a stable, deterministic tie-break — never an arbitrary or run-dependent order.
+- **FR-019**: System MUST decode the video no more than once during a detection run.
+- **FR-020**: System MUST perform detection using only local resources, with no network or cloud calls.
+- **FR-021**: System MUST perform detection using CPU only, with no dependency on GPU hardware.
+- **FR-022**: System MUST fail fast with exactly one of the following specific reasons whenever detection cannot proceed correctly, rather than silently returning an incomplete or empty segment list as if it were a genuine result: `SOURCE_NOT_VALIDATED` (the supplied `LoadResult` is not a successful, validated video), `INVALID_SCENE_DETECTION_RESULT` (the supplied Scene Detection result is missing, malformed, or does not correspond to the video being analyzed), `INVALID_REPLAY_CONFIGURATION` (the configured signal weights, threshold, or minimum duration are invalid), `SOURCE_UNAVAILABLE_MID_RUN` (the video becomes inaccessible after detection has begun), or `DECODE_FAILURE_MID_RUN` (a frame fails to decode partway through an otherwise-successful run).
+- **FR-023**: System MUST support cooperative cancellation of an active detection run. On cancellation, the system MUST stop processing further frames, MUST release any resources it holds, and MUST still emit exactly one diagnostics record summarizing the partial run.
+- **FR-024**: System MUST produce the identical ordered segment sequence (including confidence scores) for the same video, the same Scene Detection result, and the same configuration on every run (deterministic output) — including whatever frame-sampling strategy is used internally (a technical decision left to `/speckit-plan`, but the chosen strategy MUST itself be deterministic).
+- **FR-025**: System MUST emit exactly one standardized execution diagnostics record per detection run, containing: candidate segments evaluated, replay segments accepted, replay segments rejected, average confidence across accepted segments, highest confidence among accepted segments, longest replay segment duration, total replay duration detected, the sampling rate used, and processing duration.
+- **FR-026**: System MUST NOT itself persist results to any database table — it returns an in-memory result; persistence is the Pipeline Orchestrator's responsibility.
+- **FR-027**: System MUST NOT determine whether a detected event or moment is highlight-worthy, and MUST NOT decide how replay footage should be presented — those decisions belong to Event Detection and Clip Generator respectively.
+- **FR-028**: System MUST be the sole module responsible for converting signal evidence into a replay confidence and classification decision. This requirement constrains downstream consumers as much as this feature itself: no other module may recompute replay classification from raw signal evidence or apply a different threshold to this feature's output.
+- **FR-029**: For each of the four signals this feature computes directly (logo presence, scoreboard absence, motion profile, camera angle — not the transition signal, which reuses Scene Detection's already-finalized per-boundary value as-is per FR-007), the segment-level score MUST be the mean (average) of that signal's score across every frame sampled within the candidate segment — not a peak/maximum or majority-vote alternative.
+
+### Key Entities
+
+- **Replay Segment**: A single detected stretch of replay footage — this feature's public output unit. Key attributes: `replay_id` (stable, unique within its detection run), `start_seconds`, `end_seconds`, and a combined `confidence` score (0.0-1.0, always present).
+- **Replay Evidence**: An internal record of how a candidate segment's combined confidence was reached, kept for diagnostics, explainability, and future weight tuning — not necessarily part of the public segment output, but preserved by the implementation rather than discarded. Key attributes: per-signal scores (logo, scoreboard-absence, motion-profile, transition, camera-angle — the four self-computed signals' scores being the per-segment mean across sampled frames, per FR-029) and the resulting combined confidence.
+- **Replay Detection Request**: A caller's request configuration. Key attributes: the validated video (`LoadResult`) to analyze, the Scene Detection result to derive candidate segments and the transition signal from, and the configured signal weights/threshold/minimum-duration values (validated per FR-010).
+- **Replay Detection Result**: The complete, ordered output of one detection run for one video. Key attributes: a source-video identifier, the ordered list of Replay Segments, total segment count, and total replay duration detected — self-contained enough to be consumed by a later, separate process (FR-017).
+- **Replay Detection Diagnostics**: The standardized per-run record summarizing one complete (or cancelled) detection run, consistent with the platform's existing Module Observability & Diagnostics standard. Key attributes: candidate segments evaluated, replay segments accepted, replay segments rejected, average confidence, highest confidence, longest replay duration, total replay duration, sampling rate used, processing duration, and failure reason (if applicable).
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: A consuming pipeline module (Event Detection or Clip Generator) can obtain a full, ordered, self-contained replay segment list for a validated video without implementing any of its own replay-detection or replay-classification logic.
+- **SC-002**: Every reported replay segment includes a confidence score between 0.0 and 1.0 inclusive — never absent.
+- **SC-003**: A candidate segment shorter than the configured minimum duration is never reported as a replay segment, in 100% of test cases.
+- **SC-004**: Replay detection for a 3-4 hour match completes within its allotted share of the platform's overall analysis time budget on target-class hardware, in 100% of test runs.
+- **SC-005**: The video is decoded no more than once per detection run, in 100% of test runs.
+- **SC-006**: Given the same video, Scene Detection result, and configuration, repeated detection runs produce identical ordered segment sequences (including tie-break ordering) 100% of the time.
+- **SC-007**: Every detection run produces exactly one diagnostics record, regardless of whether it found zero segments or several.
+- **SC-008**: Detection completes using only local, offline resources on target-class hardware (CPU-only, 8GB RAM class machine) in 100% of test runs.
+- **SC-009**: When measured against a hand-annotated reference match (the platform's golden dataset, `specs/technical_plan.md`'s "Golden Dataset & Accuracy Verification" standard), replay segments detected by this feature account for at least 90% of actual replay footage duration in the reference match. This criterion depends on the golden dataset existing — a cross-cutting platform concern tracked separately, not something this feature alone can satisfy through unit/contract/integration testing.
+- **SC-010**: A configuration whose signal weights do not sum to 1.0 is rejected before any frame is processed, in 100% of test cases.
+- **SC-011**: Every `replay_id` within a single detection result is unique, in 100% of test cases.
+
+## Assumptions
+
+- This feature returns an in-memory `Replay Detection Result`; it does not write to the `replays` table itself. The existing `replays` table schema (`specs/technical_plan.md`) — currently a 3-value `detection_method` enum (logo/scoreboard/slowmo) — does not match this feature's weighted multi-signal design and will need a compatibility review during `/speckit-plan`. This spec intentionally does not resolve the schema question; it only requires the returned result to carry everything a persistence layer would need (FR-017).
+- The replay-logo signal's reference template (what the broadcaster's specific replay bumper graphic looks like) is expected to be an optional, caller-supplied configuration value, not something this feature discovers or trains on its own. When absent, that one signal contributes zero confidence rather than blocking detection — consistent with this platform's established pattern of graceful per-signal degradation over all-or-nothing failure (e.g., Scoreboard OCR's own confidence-based handling of an undetectable region).
+- The camera-angle signal is a relative/comparative measure (how much the current segment's framing differs from a recent live-action baseline), not a comparison against a pre-trained, broadcaster-specific classifier — no such reference data exists for this platform, and requiring one would make the signal unusable out of the box.
+- The exact frame-sampling rate/density this feature uses (and whether it must differ from Scoreboard OCR's 1 FPS rate to characterize motion-profile accurately) is a technical question left to `research.md` during `/speckit-plan` — `specs/technical_plan.md`'s existing ~2-5 minute budget estimate assumed the same sampled frames as Module 1a's default rate, which this feature's own planning must verify is actually sufficient for the motion-profile signal, or document why a different rate is needed instead. Whatever rate/strategy is ultimately chosen must itself be deterministic (FR-024).
+- `Replay Evidence` (the per-signal score breakdown) is an internal record this feature's implementation must preserve for diagnostics/explainability/future tuning, but this spec does not require it to be part of the public `Replay Segment`/`Replay Detection Result` shape consumed by other modules — only that it isn't discarded.
+- This feature inherits Video Loader's input constraints by depending on its `LoadResult` (MP4/MKV containers, video already fully saved to local disk, not a live stream), and Scene Detection's input constraints by depending on its result (a completed detection run for the same video).
+- The ≥90% replay-removal accuracy target (constitution Principle IV) is a platform-level target this feature is the primary owner of meeting, verified against the golden dataset once it exists (SC-009) — not a bar every individual signal must clear on its own; a weak or absent single signal (e.g., no logo template) is expected to be compensated for by the other four.

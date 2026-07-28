@@ -98,10 +98,10 @@ Authoritative spec, plan, data model, and contract now live in [specs/001-video-
 - Output: List of scene boundaries with timestamps
 
 ### Module 3: Replay Detection
-- Methods: Logo detection, scoreboard tracking, slow-mo
-- Input: frames from Module 1a's Frame Extraction Service, not direct OpenCV access
-- Output: Replay segments with start/end times
-- Target: Remove ≥90% replays
+- Methods: five independently-weighted signals (`config/default.yaml`'s `replay.signals`) combined into one confidence per candidate segment — replay-logo template match, scoreboard-region absence, motion profile (slow-motion characteristic), Scene Detection's own `REPLAY_TRANSITION` classification (reused directly, not redetected), and camera-angle difference from a rolling live-action baseline. See `specs/004-replay-detection/research.md` for the per-signal computation approach.
+- Input: candidate segment boundaries from Module 2's (Scene Detection) boundary list, plus frames from Module 1a's Frame Extraction Service (sampled at the platform's 1 FPS rate — resolved during this module's own `/speckit-plan`, see `specs/004-replay-detection/research.md` Decision 2), not direct OpenCV access
+- Output: Replay segments with start/end times and a combined confidence, returned in-memory (this module does not persist to the `replays` table itself — that remains the Pipeline Orchestrator's responsibility, per every other module's own precedent)
+- Target: Remove ≥90% replays (verified against the platform's golden dataset once it exists — see "Golden Dataset & Accuracy Verification" below)
 
 ### Module 4: Scoreboard OCR
 - Technology: Tesseract OCR
@@ -248,11 +248,18 @@ CREATE INDEX idx_events_player ON events (player);
 CREATE INDEX idx_events_team ON events (team);
 CREATE INDEX idx_events_over ON events (over_number, ball_in_over);
 
+-- Schema updated per Replay Detection's own /speckit-plan (specs/004-replay-detection/research.md
+-- Decision 1): `detection_method` (a leftover single-method design predating the module's actual
+-- weighted five-signal architecture, config/default.yaml's `replay.signals`) is replaced with
+-- `confidence`, the module's real output. `replay_id` is assigned by Replay Detection itself
+-- (sequential, unique per run) and is intended to be inserted here as the literal primary key
+-- value (an explicit-PK insert), not an auto-assigned rowid, so a cross-reference made during
+-- detection stays stable once persisted.
 CREATE TABLE replays (
   replay_id INTEGER PRIMARY KEY,
   start_seconds REAL,
   end_seconds REAL,
-  detection_method TEXT CHECK (detection_method IN ('logo', 'scoreboard', 'slowmo')),
+  confidence REAL,          -- 0.0-1.0, the combined weighted confidence (specs/004-replay-detection/)
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

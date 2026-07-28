@@ -80,15 +80,27 @@ See [specs/technical_plan.md](./specs/technical_plan.md) for detailed architectu
 
 ## 🧪 Testing
 
+Tests are split into two tiers, selected via the `benchmark` pytest marker (registered in `pyproject.toml`). `tests/benchmark/` holds real-time/real-memory measurements against multi-hour synthetic fixtures — individually slow (minutes each), several dozen minutes combined. Everything else (`tests/unit/`, `tests/contract/`, `tests/integration/`) is fast (well under a minute total) and is what you run on every change.
+
+**Fast tests + coverage (day-to-day / PR):**
+
 ```bash
-# Run all tests
+# Deselects tests/benchmark by default (pyproject.toml addopts) -- no flags needed
 pytest
 
-# Run with coverage
-pytest --cov=src tests/
+# With the coverage gate (must stay at 100% on src/cvip/video -- Constitution Principle VII)
+pytest --cov=src/cvip/video --cov-fail-under=100
 
 # Run a specific module's tests, e.g. Video Loader
 pytest tests/unit/test_video_loader_validation.py
+```
+
+**Benchmark tests (nightly / on-demand, before a release):**
+
+```bash
+# A trailing -m on the command line overrides the addopts default, so this
+# runs ONLY the benchmark tier, not "everything else plus benchmarks"
+pytest -m benchmark
 ```
 
 ## 🔧 Development
@@ -99,17 +111,12 @@ pytest tests/unit/test_video_loader_validation.py
 pip install -r requirements-dev.txt
 ```
 
-### Run Tests
-
-```bash
-pytest tests/ -v --cov=src
-```
-
 ### Code Style
 
 ```bash
 black src/ tests/
 pylint src/
+mypy src/
 ```
 
 ## 📊 Performance Targets

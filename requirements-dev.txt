@@ -2,9 +2,14 @@
 -r requirements.txt
 
 # Testing
-pytest==7.4.0
-pytest-cov==4.1.0
-pytest-mock==3.11.1
+# Pinned to what's actually installed/verified against this project (Python
+# 3.14) -- the previous 7.4.0/4.1.0/3.11.1 pins predate Python 3.14 and had
+# silently drifted from the real environment (--ignore=tests/benchmark
+# stopped excluding anything under pytest 9.x combined with this project's
+# testpaths; see tests/benchmark's `benchmark` marker for the fix).
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-mock==3.15.1
 
 # Code Quality
 black==23.9.1

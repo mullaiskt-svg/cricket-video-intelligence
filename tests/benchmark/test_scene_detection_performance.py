@@ -13,6 +13,8 @@ from cvip.video.models import LoadStatus
 from cvip.video.scene_detection import detect_scenes
 from cvip.video.scene_detection_models import SceneDetectionRequest
 
+pytestmark = pytest.mark.benchmark
+
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_loader"
 SC_003_MAX_SECONDS = 20 * 60  # upper bound of the documented ~10-20 minute budget
 SC_004_MAX_TOLERANCE_RATIO = 0.20  # peak memory for the long clip vs. the short one

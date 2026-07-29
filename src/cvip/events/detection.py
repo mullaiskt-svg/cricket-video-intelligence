@@ -205,6 +205,12 @@ class EventDetectionRunner:
         # FR-014, FR-016) ----------------------------------------------------
         raw_previous = raw_by_timestamp.get(previous.timestamp_seconds)
         raw_current = raw_by_timestamp.get(current.timestamp_seconds)
+        if raw_previous is None or raw_current is None:
+            missing_ts = previous.timestamp_seconds if raw_previous is None else current.timestamp_seconds
+            self._fail(
+                EventDetectionFailureReason.INVALID_INPUT,
+                f"Raw OCR result missing sample at timestamp {missing_ts}s (cleaned timeline has entry but raw does not)",
+            )
         confidence = _confidence(raw_previous, raw_current)
         replay_match = _is_in_replay(current.timestamp_seconds, replay_index)
 

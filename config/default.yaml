@@ -33,8 +33,18 @@ replay:
     camera_angle_weight: 0.10
 
 events:
-  pre_roll_seconds: 8
-  post_roll_seconds: 12
+  # Calibrated against real match footage (First8Overs.mp4, WICKET and SIX
+  # events cross-checked by hand): the on-screen scoreboard graphic does not
+  # update until the broadcast cuts back from its post-event replay, so the
+  # OCR-detected event timestamp lags the actual live delivery by ~15s.
+  # Bowler run-up consistently begins ~30-35s before the detected timestamp;
+  # the replay consistently finishes within ~0-10s after it. pre_roll is set
+  # generously above the observed run-up lag to make sure this holds for
+  # longer run-ups too; post_roll keeps a small margin above the observed
+  # replay-completion point. A reasoned calibration from two samples, not an
+  # exhaustively tuned value -- revisit if other footage shows it's wrong.
+  pre_roll_seconds: 35
+  post_roll_seconds: 15
   merge_gap_seconds: 3
   # TEAM_MILESTONE fires each time the batting team's runs total crosses a
   # multiple of this interval (specs/007-event-detection/spec.md FR-008).

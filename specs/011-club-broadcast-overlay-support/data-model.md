@@ -7,7 +7,7 @@ No new public entity. Every dataclass this amendment touches is defined in `src/
 - **`ScoreboardOcrRequest`** — no new field. Format selection is not caller-configured (research.md Decision 1), so this amendment adds nothing here.
 - **`ScoreboardSample`** — no new field. `batter`, `non_striker`, `bowler`, `runs`, `wickets`, `over_number`, `ball_in_over`, `run_rate` are populated by whichever parsing path ran; the amendment adds a second *filler* for these same fields, not new fields.
 - **`ScoreboardOcrResult`** — unchanged.
-- **`ValidationFailureReason`** — unchanged. `PLAYER_PARSE_FAILED` still fires under the exact same condition (`parsed_fields.get("batter") is None`), now reachable from either parsing path.
+- **`ValidationFailureReason`** — no new enum value, but `PLAYER_PARSE_FAILED`'s trigger condition is narrowed by the post-implementation amendment (spec.md FR-012): it no longer fires whenever `parsed_fields.get("batter") is None`, only when *neither* `batter` *nor* any of `runs`/`wickets`/`over_number`/`ball_in_over` is present. Discovered via real-video validation (First8Overs.mp4): the original blanket gate discarded valid scores wholesale whenever the best-effort name heuristic failed, opening timeline gaps that caused Event Detection to miss FOUR/SIX events. Reachable from either parsing path, same as before.
 - **`ScoreboardOcrFailureReason`** — unchanged; this amendment introduces no new run-level structural failure mode.
 
 ## Extended entity: `OCREvidence.parsed_fields`

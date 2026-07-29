@@ -345,14 +345,55 @@ def test_innings_transition_suppresses_monotonic_checks():
 
 
 # --- FR-030/FR-031: structurally unparseable essential field ----------------
+# specs/011-club-broadcast-overlay-support/ real-video finding (quickstart.md
+# Steps 3/5): `batter` no longer gates a reading with a fully valid score --
+# see _validate_reading()'s docstring. PLAYER_PARSE_FAILED now fires only
+# when *nothing* usable (neither a name nor any score field) was found.
 
 
-def test_missing_batter_field_yields_player_parse_failed():
+def test_missing_batter_field_with_valid_score_still_passes():
     extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
 
     passed, reason = extractor._validate_reading(
-        {"runs": 10, "wickets": 1, "over_number": 2, "ball_in_over": 3}, _LastAcceptedReading()
+        {"runs": 10, "wickets": 1, "over_number": 2, "ball_in_over": 3}, baseline
     )
+
+    assert passed is True
+    assert reason is None
+
+
+def test_missing_batter_field_with_valid_score_still_updates_baseline_for_next_reading():
+    """The concrete behavior this fix targets: a name-less-but-score-valid
+    reading must still advance the accepted-reading baseline, so the NEXT
+    reading's monotonic checks compare against it rather than against a
+    stale, multi-ball-old baseline (the real-video finding: this gap is what
+    caused Event Detection to silently miss FOUR/SIX events)."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=10, wickets=0, over_number=2, ball_in_over=0)
+
+    # A name-less reading with a valid, monotonically-later score.
+    passed, _ = extractor._validate_reading(
+        {"runs": 14, "wickets": 0, "over_number": 2, "ball_in_over": 1}, baseline
+    )
+    assert passed is True
+    baseline.update(runs=14, wickets=0, over_number=2, ball_in_over=1)
+
+    # A subsequent reading with runs *between* the two prior values would
+    # have been wrongly rejected as RUNS_DECREASED had the name-less
+    # reading above not updated the baseline.
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 12, "wickets": 0, "over_number": 2, "ball_in_over": 2}, baseline
+    )
+    assert passed is False
+    assert reason == ValidationFailureReason.RUNS_DECREASED
+
+
+def test_reading_with_no_name_and_no_score_field_yields_player_parse_failed():
+    extractor = _make_extractor()
+
+    passed, reason = extractor._validate_reading({}, _LastAcceptedReading())
 
     assert passed is False
     assert reason == ValidationFailureReason.PLAYER_PARSE_FAILED
@@ -923,10 +964,16 @@ def test_generic_broadcast_batter_attribution_is_verified():
     assert parsed["batter_attribution"] == "verified"
 
 
-# --- T018 (US2): no locatable name still yields PLAYER_PARSE_FAILED --------
+# --- T018 (US2, amended per real-video finding): no locatable name --------
+# Originally: a club-broadcast reading with no locatable name unconditionally
+# failed as PLAYER_PARSE_FAILED (matching FR-030's blanket batter gate).
+# specs/011-.../quickstart.md Steps 3/5 against the real First8Overs.mp4
+# recording found this caused Event Detection to silently miss FOUR/SIX
+# events spanning the resulting timeline gaps -- _validate_reading() no
+# longer gates a valid score on batter presence (see its docstring).
 
 
-def test_club_broadcast_reading_with_no_locatable_name_yields_player_parse_failed():
+def test_club_broadcast_reading_with_no_locatable_name_but_valid_score_still_passes():
     extractor = _make_extractor()
     tokens = [("_0-0/0.0(20)", 90.0)]  # score only, no adjacent name anywhere
 
@@ -934,6 +981,20 @@ def test_club_broadcast_reading_with_no_locatable_name_yields_player_parse_faile
     passed, reason = extractor._validate_reading(parsed, _LastAcceptedReading())
 
     assert parsed.get("batter") is None
+    assert parsed.get("runs") == 0
+    assert passed is True
+    assert reason is None
+
+
+def test_club_broadcast_reading_with_no_name_and_no_score_yields_player_parse_failed():
+    extractor = _make_extractor()
+    tokens = [("Chai", 70.0), ("Cricket", 70.0), ("Club", 70.0)]  # team-name text only
+
+    parsed, _ = extractor._parse_fields(tokens)
+    passed, reason = extractor._validate_reading(parsed, _LastAcceptedReading())
+
+    assert parsed.get("batter") is None
+    assert parsed.get("runs") is None
     assert passed is False
     assert reason == ValidationFailureReason.PLAYER_PARSE_FAILED
 

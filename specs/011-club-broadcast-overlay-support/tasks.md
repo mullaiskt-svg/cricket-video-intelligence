@@ -140,6 +140,18 @@ Single project (plan.md Structure Decision). Most implementation changes land in
 
 ---
 
+## Phase 7: Post-Implementation Amendment (FR-012 — real-video validation finding)
+
+**Purpose**: T036's real-fixture run (First8Overs.mp4, full 40-minute recording, not just a short clip) surfaced a genuine correctness gap: Event Detection recovered only 6 events (3 FOUR, 3 WICKET) from an 8-over innings. Root-cause analysis traced this to `specs/005-scoreboard-ocr/spec.md` FR-030's original design (batter absence rejects the whole reading, not just the name), which this amendment's real-footage name-failure rate made far more consequential than it was for the original asterisk convention. See spec.md's "Post-implementation amendment" note, FR-012, SC-006, and research.md Decision 10 for the full rationale.
+
+- [X] T037 Amend `_validate_reading()` in `src/cvip/video/scoreboard_ocr.py` so `batter` no longer unconditionally gates `runs`/`wickets`/`over_number`/`ball_in_over` — `PLAYER_PARSE_FAILED` now fires only when neither a name nor any score field is present (research.md Decision 10, spec.md FR-012).
+- [X] T038 Update the two existing tests that directly asserted the old blanket-gate behavior (`tests/unit/test_scoreboard_ocr_validation.py`: the FR-030/FR-031 generic-format test, and T018's club-broadcast equivalent) to reflect the new, narrowed trigger condition; add dedicated tests for (a) a name-less-but-score-valid reading passing, (b) a reading with neither a name nor a score still failing as `PLAYER_PARSE_FAILED`, (c) a name-less reading still advancing the baseline for the next reading's monotonic checks (SC-006).
+- [X] T039 Re-run the full Scoreboard OCR + Event Detection + whole-repo test suites and confirm zero regressions; re-confirm 100% coverage on `src/cvip/video/scoreboard_ocr.py`.
+- [X] T040 Re-run the full pipeline (Scoreboard OCR → OCR Timeline Smoother → Event Detection → Clip Generator → Video Stitcher) against the full First8Overs.mp4 recording and confirm the event count materially improves over the pre-fix baseline (6 events) — validating SC-006 end-to-end, not just at the unit-test level.
+- [X] T041 Update spec.md (Post-implementation amendment note, FR-008 superseded, FR-012 added, Edge Cases, SC-006), data-model.md, and contracts/scoreboard_ocr_contract_amendment.md to document this change, consistent with this platform's amendment-document convention (`specs/011-.../` is itself already a delta document against `specs/005-.../`).
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

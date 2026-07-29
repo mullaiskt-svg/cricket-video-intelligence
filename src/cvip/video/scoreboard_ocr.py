@@ -657,23 +657,41 @@ class ScoreboardOcrExtractor:
     def _validate_reading(
         self, parsed_fields: Dict[str, Any], baseline: _LastAcceptedReading
     ) -> Tuple[bool, Optional[ValidationFailureReason]]:
-        """FR-012-FR-016, FR-030, FR-031. `batter` is the one field whose
-        absence is treated as a structural parse failure (FR-030's own
-        example); the numeric fields are individually optional but
-        rule-checked when present.
+        """FR-012-FR-016, FR-030, FR-031 -- amended per
+        specs/011-club-broadcast-overlay-support/'s real-video validation
+        finding (quickstart.md Steps 3/5 against First8Overs.mp4): FR-030's
+        original design treated a missing `batter` as an unconditional,
+        whole-reading structural-parse failure. On real footage where the
+        best-effort name heuristic fails more often than the score fields
+        themselves do, that blanket gate discarded otherwise-good score
+        readings wholesale, opening multi-ball gaps in the accepted-reading
+        baseline -- which in turn made Event Detection's single-ball-advance
+        requirement silently miss FOUR/SIX events spanning those gaps.
+
+        `batter` is no longer a gate on the *score* fields: a reading with a
+        fully valid, monotonic score is now accepted (and updates the
+        baseline) regardless of whether a name could be located. A reading
+        with *neither* a locatable name *nor* any score field at all --
+        i.e., nothing usable was extracted -- still fails as
+        `PLAYER_PARSE_FAILED` (FR-030's "nothing usable" case, narrowed
+        rather than removed). `parsed_fields["batter"]`/`ScoreboardSample.batter`
+        remain `None` exactly as before when unreadable; a caller that cares
+        about name presence must still check that field directly rather
+        than inferring it from `parse_confidence`.
 
         Parser-agnostic by construction (specs/011-.../FR-009): this method
         only ever reads keys out of `parsed_fields`, never which
         `_ScoreParser` produced them -- the same validation logic applies
         identically to a `GenericBroadcastParser`- or `ClubBroadcastParser`-
         produced reading."""
-        if parsed_fields.get("batter") is None:
-            return False, ValidationFailureReason.PLAYER_PARSE_FAILED
-
         runs = parsed_fields.get("runs")
         wickets = parsed_fields.get("wickets")
         over_number = parsed_fields.get("over_number")
         ball_in_over = parsed_fields.get("ball_in_over")
+
+        has_any_score_field = any(v is not None for v in (runs, wickets, over_number, ball_in_over))
+        if parsed_fields.get("batter") is None and not has_any_score_field:
+            return False, ValidationFailureReason.PLAYER_PARSE_FAILED
 
         if ball_in_over is not None and not (0 <= ball_in_over <= BALL_IN_OVER_MAX):
             return False, ValidationFailureReason.INVALID_BALL_NUMBER

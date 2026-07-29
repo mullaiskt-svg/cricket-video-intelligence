@@ -20,6 +20,17 @@ FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_stitcher"
 SOURCE_LONG = str(FIXTURES_DIR / "source_long.mp4")
 
 CLIP_COUNT = 36  # "a few dozen clips" (spec.md SC-005)
+
+
+@pytest.fixture(autouse=True)
+def _require_video_stitcher_fixtures():
+    """Skip with an actionable message on a fresh checkout (*.mp4 is
+    gitignored) rather than failing confusingly with SOURCE_VIDEO_UNAVAILABLE."""
+    if not Path(SOURCE_LONG).exists():
+        pytest.skip(
+            "Video Stitcher fixtures not found -- run "
+            "`python tests/fixtures/video_stitcher/generate_fixtures.py` first."
+        )
 BUDGET_SECONDS = 30.0
 
 

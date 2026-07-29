@@ -17,7 +17,16 @@ from cvip.stitcher.models import StitchRequest, StreamCopyParameters
 from cvip.stitcher.stitcher import stitch_video
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_stitcher"
-SOURCE_SHORT = str(FIXTURES_DIR / "source_short.mp4")
+
+
+def _source_short() -> str:
+    path = FIXTURES_DIR / "source_short.mp4"
+    if not path.exists():
+        pytest.skip(
+            "Fixture source_short.mp4 not found -- run "
+            "`python tests/fixtures/video_stitcher/generate_fixtures.py` first."
+        )
+    return str(path)
 
 
 @dataclass(frozen=True)
@@ -68,6 +77,39 @@ def test_run_reports_timeout_as_a_failed_process_result(mocker):
 
     assert result.exit_code == -1
     assert result.stdout == "partial"
+    assert "timed out" in result.stderr
+
+
+def test_run_decodes_bytes_output_on_timeout(mocker):
+    # exc.stdout/.stderr may be raw bytes even with text=True (platform/
+    # Python-version-dependent CPython internals) -- must not raise TypeError.
+    import subprocess as subprocess_module
+
+    mocker.patch(
+        "cvip.stitcher.ffmpeg.subprocess.run",
+        side_effect=subprocess_module.TimeoutExpired(cmd=["ffmpeg"], timeout=1, output=b"partial-bytes", stderr=b"stall-bytes"),
+    )
+
+    result = ffmpeg.run_extract_segment("source.mp4", 0.0, 1.0, "out.mp4")
+
+    assert result.exit_code == -1
+    assert result.stdout == "partial-bytes"
+    assert "stall-bytes" in result.stderr
+    assert "timed out" in result.stderr
+
+
+def test_run_reports_timeout_with_no_captured_output(mocker):
+    import subprocess as subprocess_module
+
+    mocker.patch(
+        "cvip.stitcher.ffmpeg.subprocess.run",
+        side_effect=subprocess_module.TimeoutExpired(cmd=["ffmpeg"], timeout=1),
+    )
+
+    result = ffmpeg.run_extract_segment("source.mp4", 0.0, 1.0, "out.mp4")
+
+    assert result.exit_code == -1
+    assert result.stdout == ""
     assert "timed out" in result.stderr
 
 
@@ -139,8 +181,8 @@ def _concat_command(list_path, out_path):
 def _run_fully_mocked_stitch(tmp_path, mocker, clip_plan=None, output_path=None):
     clip_plan = clip_plan or _ClipPlan(
         clips=(
-            _Clip("c1", 0.0, 2.0, SOURCE_SHORT, source_event_ids=("e1",)),
-            _Clip("c2", 5.0, 7.0, SOURCE_SHORT, source_event_ids=("e2", "e3")),
+            _Clip("c1", 0.0, 2.0, _source_short(), source_event_ids=("e1",)),
+            _Clip("c2", 5.0, 7.0, _source_short(), source_event_ids=("e2", "e3")),
         )
     )
     output_path = output_path or str(tmp_path / "out.mp4")
@@ -193,12 +235,12 @@ def test_extraction_and_concatenation_use_correct_clip_ranges(tmp_path, mocker):
     )
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 10.0, 15.0, SOURCE_SHORT), _Clip("c2", 20.0, 22.0, SOURCE_SHORT)))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 10.0, 15.0, _source_short()), _Clip("c2", 20.0, 22.0, _source_short())))
     request = StitchRequest(clip_plan=clip_plan, output_path=str(tmp_path / "out.mp4"))
     with stitch_video(request) as runner:
         runner.run()
 
-    assert extract_calls == [(SOURCE_SHORT, 10.0, 15.0), (SOURCE_SHORT, 20.0, 22.0)]
+    assert extract_calls == [(_source_short(), 10.0, 15.0), (_source_short(), 20.0, 22.0)]
 
 
 def test_concat_list_file_written_in_clip_plan_order(tmp_path, mocker):
@@ -221,7 +263,7 @@ def test_concat_list_file_written_in_clip_plan_order(tmp_path, mocker):
     )
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT), _Clip("c2", 5.0, 7.0, SOURCE_SHORT)))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()), _Clip("c2", 5.0, 7.0, _source_short())))
     request = StitchRequest(clip_plan=clip_plan, output_path=str(tmp_path / "out.mp4"))
     with stitch_video(request) as runner:
         runner.run()
@@ -262,7 +304,7 @@ def test_segment_extraction_failure_raises_stitch_operation_failed_and_cleans_up
     )
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     output_path = tmp_path / "out.mp4"
     request = StitchRequest(clip_plan=clip_plan, output_path=str(output_path))
 
@@ -288,7 +330,7 @@ def test_concatenation_failure_raises_stitch_operation_failed_and_cleans_up(tmp_
     )
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     output_path = tmp_path / "out.mp4"
     request = StitchRequest(clip_plan=clip_plan, output_path=str(output_path))
 
@@ -315,7 +357,7 @@ def test_output_validation_missing_file_raises_stitch_operation_failed(tmp_path,
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.run_concat", side_effect=_fake_concat_no_output)
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     request = StitchRequest(clip_plan=clip_plan, output_path=str(tmp_path / "out.mp4"))
 
     with pytest.raises(VideoStitchingError) as exc_info:
@@ -338,7 +380,7 @@ def test_output_validation_empty_file_raises_stitch_operation_failed(tmp_path, m
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.run_concat", side_effect=_fake_concat_empty_output)
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     request = StitchRequest(clip_plan=clip_plan, output_path=str(tmp_path / "out.mp4"))
 
     with pytest.raises(VideoStitchingError) as exc_info:
@@ -365,7 +407,7 @@ def test_output_validation_unprobeable_file_raises_stitch_operation_failed(tmp_p
     )
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     request = StitchRequest(clip_plan=clip_plan, output_path=str(tmp_path / "out.mp4"))
 
     with pytest.raises(VideoStitchingError) as exc_info:
@@ -379,7 +421,7 @@ def test_unexpected_exception_mid_run_is_wrapped_as_stitch_operation_failed(tmp_
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.run_extract_segment", side_effect=RuntimeError("disk full"))
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     output_path = tmp_path / "out.mp4"
     request = StitchRequest(clip_plan=clip_plan, output_path=str(output_path))
 
@@ -407,7 +449,7 @@ def test_output_file_removal_failure_is_recorded_not_removed(tmp_path, mocker):
     mocker.patch("cvip.stitcher.stitcher.ffmpeg.probe_stream_parameters", side_effect=RuntimeError("skip"))
     mocker.patch("cvip.stitcher.stitcher.os.remove", side_effect=OSError("locked by another process"))
 
-    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, SOURCE_SHORT),))
+    clip_plan = _ClipPlan(clips=(_Clip("c1", 0.0, 2.0, _source_short()),))
     output_path = tmp_path / "out.mp4"
     request = StitchRequest(clip_plan=clip_plan, output_path=str(output_path))
 

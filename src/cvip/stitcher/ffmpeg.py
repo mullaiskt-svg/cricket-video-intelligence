@@ -32,6 +32,14 @@ class ProcessResult:
     stderr: str
 
 
+def _decode(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _run(command: Tuple[str, ...], timeout_seconds: float) -> ProcessResult:
     start = time.perf_counter()
     try:
@@ -44,9 +52,14 @@ def _run(command: Tuple[str, ...], timeout_seconds: float) -> ProcessResult:
         exit_code = completed.returncode
         stdout, stderr = completed.stdout, completed.stderr
     except subprocess.TimeoutExpired as exc:
+        # exc.stdout/.stderr may be raw bytes even though text=True was
+        # passed to subprocess.run() -- the exception is raised before the
+        # text-decoding step runs on some platforms/Python versions, so
+        # decode defensively rather than relying on that undocumented
+        # behavior.
         exit_code = -1
-        stdout = exc.stdout or ""
-        stderr = (exc.stderr or "") + "\n[cvip] process timed out"
+        stdout = _decode(exc.stdout)
+        stderr = _decode(exc.stderr) + "\n[cvip] process timed out"
     duration = time.perf_counter() - start
     return ProcessResult(command=command, exit_code=exit_code, duration_seconds=duration, stdout=stdout, stderr=stderr)
 

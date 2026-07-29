@@ -13,7 +13,16 @@ from cvip.stitcher.stitcher import VideoStitcherRunner, stitch_video
 from cvip.stitcher.models import StitchRequest, StitchResult
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_stitcher"
-SOURCE_SHORT = str(FIXTURES_DIR / "source_short.mp4")
+
+
+def _require_fixture(name: str) -> Path:
+    path = FIXTURES_DIR / name
+    if not path.exists():
+        pytest.skip(
+            f"Fixture {name} not found -- run "
+            "`python tests/fixtures/video_stitcher/generate_fixtures.py` first."
+        )
+    return path
 
 
 @dataclass(frozen=True)
@@ -32,7 +41,7 @@ class _ClipPlan:
 
 def _valid_request(tmp_path, **overrides) -> StitchRequest:
     clip_plan = overrides.pop("clip_plan", None) or _ClipPlan(
-        clips=(_Clip("c1", 1.0, 3.0, SOURCE_SHORT),)
+        clips=(_Clip("c1", 1.0, 3.0, str(_require_fixture("source_short.mp4"))),)
     )
     output_path = overrides.pop("output_path", str(tmp_path / "output.mp4"))
     return StitchRequest(clip_plan=clip_plan, output_path=output_path)

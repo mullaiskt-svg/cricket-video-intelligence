@@ -10,6 +10,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
+
 from cvip.stitcher.errors import VideoStitchingError, VideoStitchingFailureReason
 from cvip.stitcher.models import StitchRequest
 from cvip.stitcher.stitcher import stitch_video
@@ -17,6 +19,18 @@ from cvip.stitcher.stitcher import stitch_video
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_stitcher"
 SOURCE_SHORT = str(FIXTURES_DIR / "source_short.mp4")
 SOURCE_LONG = str(FIXTURES_DIR / "source_long.mp4")
+
+
+@pytest.fixture(autouse=True)
+def _require_video_stitcher_fixtures():
+    """Every test in this module needs the real fixture videos -- skip with
+    an actionable message on a fresh checkout (*.mp4 is gitignored) rather
+    than failing confusingly with SOURCE_VIDEO_UNAVAILABLE."""
+    if not (FIXTURES_DIR / "source_short.mp4").exists() or not (FIXTURES_DIR / "source_long.mp4").exists():
+        pytest.skip(
+            "Video Stitcher fixtures not found -- run "
+            "`python tests/fixtures/video_stitcher/generate_fixtures.py` first."
+        )
 
 
 @dataclass(frozen=True)

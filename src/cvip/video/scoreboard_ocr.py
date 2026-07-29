@@ -1,7 +1,10 @@
 """Scoreboard OCR: extract_scoreboard() and ScoreboardOcrExtractor.
 
 See specs/005-scoreboard-ocr/contracts/scoreboard_ocr_contract.md
-for the full contract this module implements.
+for the full contract this module implements, and
+specs/011-club-broadcast-overlay-support/ for the club-broadcast-overlay
+amendment (compound score strings, best-effort name extraction) layered on
+top of it via the `_ScoreParser` Strategy interface below.
 """
 
 from __future__ import annotations
@@ -9,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import cv2
 import numpy as np
@@ -60,10 +63,31 @@ _TESSERACT_CONFIDENCE_SCALE = 100.0
 # dense text block, not a full page (research.md-style reasoned default).
 _TESSERACT_CONFIG = "--psm 6"
 
+# -- specs/005-scoreboard-ocr/: the original, generic-broadcast token shapes -
 _RUNS_WICKETS_RE = re.compile(r"^(\d+)/(\d+)$")
 _OVER_BALL_RE = re.compile(r"^(\d+)\.(\d+)$")
 _BOWLER_LABEL_RE = re.compile(r"^(?:B|BOWLER)[:.]?$", re.IGNORECASE)
 _NAME_RE = re.compile(r"^[A-Za-z]+\*?$")
+
+# -- specs/011-club-broadcast-overlay-support/: the club-broadcast overlay --
+# amendment's token shapes (research.md Decisions 2-3). `_COMPOUND_SCORE_RE`
+# uses `search()`, not `match()`/`fullmatch()`, to tolerate the observed
+# leading-noise-character case (a stray "_" immediately before the score,
+# a Tesseract misread of the overlay's decorative edge pixel).
+_COMPOUND_SCORE_RE = re.compile(r"(\d+)-(\d+)/(\d+)\.(\d+)\(\d+\)")
+
+# A player-stats token immediately following a name in this overlay: batter
+# "0(0)" (runs-and-balls), bowler "0-0(0)" (wickets-runs-and-overs) -- the
+# joined form. `_BARE_INT_RE`/`_PAREN_INT_RE` together detect the split form
+# Tesseract was also observed to produce ("0" then "(0)" as two tokens).
+_STATS_MARKER_RE = re.compile(r"^\d+-?\d*\(\d+\)$")
+_BARE_INT_RE = re.compile(r"^\d+$")
+_PAREN_INT_RE = re.compile(r"^\(\d+\)$")
+
+# A club-broadcast name fragment: plain alphabetic, no asterisk convention
+# (unlike `_NAME_RE`, which tolerates a trailing "*" for the original
+# format's striker marker -- this format has no text-visible equivalent).
+_CLUB_NAME_FRAGMENT_RE = re.compile(r"^[A-Za-z]+$")
 
 _ExtractionFailureToScoreboardOcrFailure = {
     ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN: ScoreboardOcrFailureReason.SOURCE_UNAVAILABLE_MID_RUN,
@@ -79,6 +103,227 @@ def extract_scoreboard(request: ScoreboardOcrRequest) -> "ScoreboardOcrExtractor
             result = extractor.run()
     """
     return ScoreboardOcrExtractor(request)
+
+
+# -- specs/011-club-broadcast-overlay-support/ research.md Decision 5: -------
+# -- Parser Strategy interface -----------------------------------------------
+
+
+class _ScoreParser(Protocol):
+    """Strategy interface for the structured-parsing stage. Implementations
+    are pure functions of `tokens` alone -- no shared mutable state, no
+    dependency on prior readings -- which is what makes `_select_parser()`
+    deterministic: the same token list always selects, and is parsed by,
+    the same strategy (FR-003, FR-020)."""
+
+    name: str
+
+    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
+        ...
+
+    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        ...
+
+
+class GenericBroadcastParser:
+    """specs/005-scoreboard-ocr/'s original clean-token parsing path
+    (FR-007, FR-012-FR-016), relocated verbatim behind the `_ScoreParser`
+    interface -- not rewritten. The universal fallback: `matches()` always
+    returns `True`, so `_select_parser()`'s search always terminates here
+    if no more specific strategy claimed the reading first."""
+
+    name = "generic_broadcast"
+
+    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
+        return True
+
+    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        """Locates and parses runs, wickets, over_number/ball_in_over,
+        batter, non_striker, bowler, and run_rate from OCR tokens (FR-007),
+        attributing each field's confidence to the token(s) it came from
+        (research.md) -- a field with no attributable token is simply
+        absent, never fabricated."""
+        parsed: Dict[str, Any] = {}
+        confidences: Dict[str, float] = {}
+        consumed: set = set()
+        over_ball_found = False
+
+        for i, (text, conf) in enumerate(tokens):
+            match = _RUNS_WICKETS_RE.match(text)
+            if match and "runs" not in parsed:
+                parsed["runs"] = int(match.group(1))
+                parsed["wickets"] = int(match.group(2))
+                confidences["runs"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                confidences["wickets"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                consumed.add(i)
+                continue
+
+            match = _OVER_BALL_RE.match(text)
+            if match:
+                if not over_ball_found:
+                    parsed["over_number"] = int(match.group(1))
+                    parsed["ball_in_over"] = int(match.group(2))
+                    confidences["over_number"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                    confidences["ball_in_over"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                    over_ball_found = True
+                elif "run_rate" not in parsed:
+                    parsed["run_rate"] = float(text)
+                    confidences["run_rate"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                consumed.add(i)
+                continue
+
+            if _BOWLER_LABEL_RE.match(text) and i + 1 < len(tokens):
+                next_text, next_conf = tokens[i + 1]
+                if _NAME_RE.match(next_text):
+                    parsed["bowler"] = next_text.rstrip("*")
+                    confidences["bowler"] = next_conf / _TESSERACT_CONFIDENCE_SCALE
+                    consumed.add(i)
+                    consumed.add(i + 1)
+                continue
+
+        for i, (text, conf) in enumerate(tokens):
+            if i in consumed or not _NAME_RE.match(text):
+                continue
+            if text.endswith("*") and "batter" not in parsed:
+                parsed["batter"] = text.rstrip("*")
+                confidences["batter"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                # specs/011-.../research.md Decision 4/6: the attribution
+                # marker applies to both parsers, not only the club-
+                # broadcast one -- this is the "verified" (asterisk-backed)
+                # side of that distinction.
+                parsed["batter_attribution"] = "verified"
+            elif not text.endswith("*") and "non_striker" not in parsed:
+                parsed["non_striker"] = text
+                confidences["non_striker"] = conf / _TESSERACT_CONFIDENCE_SCALE
+
+        return parsed, confidences
+
+
+def _find_stats_marker_positions(tokens: List[Tuple[str, float]]) -> List[int]:
+    """research.md Decision 3: locates every player-stats token, joined
+    ("0(0)", "0-0(0)") or split (a bare integer immediately followed by a
+    separate "(N)" token) -- returns the index to walk backward from in
+    each case (the joined token itself, or the split form's leading bare-
+    integer token)."""
+    positions: List[int] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        text = tokens[i][0]
+        if _STATS_MARKER_RE.match(text):
+            positions.append(i)
+            i += 1
+            continue
+        if _BARE_INT_RE.match(text) and i + 1 < n and _PAREN_INT_RE.match(tokens[i + 1][0]):
+            positions.append(i)
+            i += 2
+            continue
+        i += 1
+    return positions
+
+
+def _walk_name_fragment(
+    tokens: List[Tuple[str, float]], anchor_index: int
+) -> Optional[Tuple[str, float]]:
+    """research.md Decision 3: given a stats-marker token's index, collects
+    the consecutive alphabetic-only tokens immediately preceding it (e.g.
+    "SAI" + "KRISHNA" -> "SAI KRISHNA"), stopping at the first non-matching
+    token. Returns `None` if no name-shaped token immediately precedes the
+    marker at all. Confidence is attributed from the fragment closest to
+    the marker (the last one collected, i.e. the rightmost)."""
+    fragments: List[str] = []
+    confidence: Optional[float] = None
+    i = anchor_index - 1
+    while i >= 0 and _CLUB_NAME_FRAGMENT_RE.match(tokens[i][0]):
+        fragments.append(tokens[i][0])
+        if confidence is None:
+            confidence = tokens[i][1]
+        i -= 1
+    if not fragments:
+        return None
+    fragments.reverse()
+    return " ".join(fragments), confidence if confidence is not None else 0.0
+
+
+class ClubBroadcastParser:
+    """specs/011-club-broadcast-overlay-support/'s amendment: a compound
+    score string (`{runs}-{wickets}/{over}.{ball}({total_overs})`) and no
+    text-visible striker/bowler-label convention -- names are instead
+    associated by adjacency to a player-stats token (research.md
+    Decision 3), on a best-effort basis (spec.md FR-004-FR-007)."""
+
+    name = "club_broadcast"
+
+    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
+        return any(_COMPOUND_SCORE_RE.search(text) for text, _ in tokens)
+
+    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
+        parsed: Dict[str, Any] = {}
+        confidences: Dict[str, float] = {}
+
+        score_index: Optional[int] = None
+        for i, (text, conf) in enumerate(tokens):
+            match = _COMPOUND_SCORE_RE.search(text)
+            if match:
+                parsed["runs"] = int(match.group(1))
+                parsed["wickets"] = int(match.group(2))
+                parsed["over_number"] = int(match.group(3))
+                parsed["ball_in_over"] = int(match.group(4))
+                confidences["runs"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                confidences["wickets"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                confidences["over_number"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                confidences["ball_in_over"] = conf / _TESSERACT_CONFIDENCE_SCALE
+                # research.md Decision 6: preserved verbatim for debugging
+                # without a second OCR pass -- not a public field.
+                parsed["raw_compound_score_token"] = text
+                score_index = i
+                break
+
+        pre_score_names: List[Tuple[str, float]] = []
+        post_score_names: List[Tuple[str, float]] = []
+        for stats_index in _find_stats_marker_positions(tokens):
+            name_and_conf = _walk_name_fragment(tokens, stats_index)
+            if name_and_conf is None:
+                continue
+            if score_index is not None and stats_index > score_index:
+                post_score_names.append(name_and_conf)
+            else:
+                pre_score_names.append(name_and_conf)
+
+        if pre_score_names:
+            name, conf = pre_score_names[0]
+            parsed["batter"] = name
+            confidences["batter"] = conf / _TESSERACT_CONFIDENCE_SCALE
+            # research.md Decision 4/6: "best_effort" -- this is a heuristic
+            # (first-listed name), never a verified strike determination.
+            parsed["batter_attribution"] = "best_effort"
+        if len(pre_score_names) > 1:
+            name, conf = pre_score_names[1]
+            parsed["non_striker"] = name
+            confidences["non_striker"] = conf / _TESSERACT_CONFIDENCE_SCALE
+
+        if post_score_names:
+            name, conf = post_score_names[0]
+            parsed["bowler"] = name
+            confidences["bowler"] = conf / _TESSERACT_CONFIDENCE_SCALE
+
+        return parsed, confidences
+
+
+# research.md Decision 5: `ClubBroadcastParser` is checked first (a narrow,
+# specific signal); `GenericBroadcastParser` is the universal fallback and
+# must stay last so `_select_parser()` always terminates.
+_PARSERS: Tuple[_ScoreParser, ...] = (ClubBroadcastParser(), GenericBroadcastParser())
+
+
+def _select_parser(tokens: List[Tuple[str, float]]) -> _ScoreParser:
+    """Pure, deterministic parser-strategy selection (research.md
+    Decision 5, FR-003) -- the same token list always selects the same
+    parser; no shared state, no caller configuration."""
+    for parser in _PARSERS:
+        if parser.matches(tokens):
+            return parser
+    raise AssertionError("no _ScoreParser matched -- GenericBroadcastParser must always match")
 
 
 class _LastAcceptedReading:
@@ -134,6 +379,13 @@ class ScoreboardOcrExtractor:
         self._low_confidence_count = 0
         self._skipped_count = 0
         self._validation_failure_counts: Dict[ValidationFailureReason, int] = {}
+        # specs/011-club-broadcast-overlay-support/ research.md Decision 8:
+        # per-strategy usage counts, folded into output_summary below --
+        # no new field on the shared ExecutionDiagnostics dataclass.
+        self._parser_strategy_counts: Dict[str, int] = {
+            parser.name: 0 for parser in _PARSERS
+        }
+        self._generic_broadcast_unparsed_count = 0
         self._samples: List[ScoreboardSample] = []
         self._evidence_list: List[OCREvidence] = []
 
@@ -384,62 +636,21 @@ class ScoreboardOcrExtractor:
         return raw_text, overall_confidence, tokens
 
     # -- internal: structured-parsing stage ---------------------------------
+    # specs/011-club-broadcast-overlay-support/ research.md Decision 5: this
+    # is now a thin dispatcher over the `_ScoreParser` Strategy interface
+    # (`_select_parser()` + `_PARSERS`, module level, above) rather than
+    # owning the parsing logic itself -- kept as a same-named method so
+    # every existing caller/test continues to work unmodified (FR-002).
 
     def _parse_fields(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
-        """Locates and parses runs, wickets, over_number/ball_in_over,
-        batter, non_striker, bowler, and run_rate from OCR tokens (FR-007),
-        attributing each field's confidence to the token(s) it came from
-        (research.md) -- a field with no attributable token is simply
-        absent, never fabricated."""
-        parsed: Dict[str, Any] = {}
-        confidences: Dict[str, float] = {}
-        consumed: set = set()
-        over_ball_found = False
-
-        for i, (text, conf) in enumerate(tokens):
-            match = _RUNS_WICKETS_RE.match(text)
-            if match and "runs" not in parsed:
-                parsed["runs"] = int(match.group(1))
-                parsed["wickets"] = int(match.group(2))
-                confidences["runs"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                confidences["wickets"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                consumed.add(i)
-                continue
-
-            match = _OVER_BALL_RE.match(text)
-            if match:
-                if not over_ball_found:
-                    parsed["over_number"] = int(match.group(1))
-                    parsed["ball_in_over"] = int(match.group(2))
-                    confidences["over_number"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                    confidences["ball_in_over"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                    over_ball_found = True
-                elif "run_rate" not in parsed:
-                    parsed["run_rate"] = float(text)
-                    confidences["run_rate"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                consumed.add(i)
-                continue
-
-            if _BOWLER_LABEL_RE.match(text) and i + 1 < len(tokens):
-                next_text, next_conf = tokens[i + 1]
-                if _NAME_RE.match(next_text):
-                    parsed["bowler"] = next_text.rstrip("*")
-                    confidences["bowler"] = next_conf / _TESSERACT_CONFIDENCE_SCALE
-                    consumed.add(i)
-                    consumed.add(i + 1)
-                continue
-
-        for i, (text, conf) in enumerate(tokens):
-            if i in consumed or not _NAME_RE.match(text):
-                continue
-            if text.endswith("*") and "batter" not in parsed:
-                parsed["batter"] = text.rstrip("*")
-                confidences["batter"] = conf / _TESSERACT_CONFIDENCE_SCALE
-            elif not text.endswith("*") and "non_striker" not in parsed:
-                parsed["non_striker"] = text
-                confidences["non_striker"] = conf / _TESSERACT_CONFIDENCE_SCALE
-
-        return parsed, confidences
+        """Selects the applicable `_ScoreParser` (research.md Decision 5,
+        FR-003) and delegates to it. See `GenericBroadcastParser` for the
+        original spec's clean-token path and `ClubBroadcastParser` for the
+        club-broadcast-overlay amendment's compound-score path."""
+        selected_parser = _select_parser(tokens)
+        parsed_fields, field_confidences = selected_parser.parse(tokens)
+        parsed_fields["parser_strategy"] = selected_parser.name
+        return parsed_fields, field_confidences
 
     # -- internal: cricket-rule validation stage ----------------------------
 
@@ -449,7 +660,13 @@ class ScoreboardOcrExtractor:
         """FR-012-FR-016, FR-030, FR-031. `batter` is the one field whose
         absence is treated as a structural parse failure (FR-030's own
         example); the numeric fields are individually optional but
-        rule-checked when present."""
+        rule-checked when present.
+
+        Parser-agnostic by construction (specs/011-.../FR-009): this method
+        only ever reads keys out of `parsed_fields`, never which
+        `_ScoreParser` produced them -- the same validation logic applies
+        identically to a `GenericBroadcastParser`- or `ClubBroadcastParser`-
+        produced reading."""
         if parsed_fields.get("batter") is None:
             return False, ValidationFailureReason.PLAYER_PARSE_FAILED
 
@@ -594,6 +811,21 @@ class ScoreboardOcrExtractor:
         if evidence.validation_passed is None:
             self._undetectable_count += 1
             return
+
+        # specs/011-.../research.md Decision 8: parser-strategy usage, and
+        # how many generic_broadcast-routed readings still ended in
+        # PLAYER_PARSE_FAILED (Decision 7's "unknown layout" case, tracked
+        # without a new failure-taxonomy value).
+        parser_strategy = evidence.parsed_fields.get("parser_strategy")
+        if parser_strategy in self._parser_strategy_counts:
+            self._parser_strategy_counts[parser_strategy] += 1
+            if (
+                parser_strategy == GenericBroadcastParser.name
+                and not evidence.validation_passed
+                and evidence.validation_failure_reason == ValidationFailureReason.PLAYER_PARSE_FAILED
+            ):
+                self._generic_broadcast_unparsed_count += 1
+
         if sample.ocr_confidence < self._request.min_confidence:
             self._low_confidence_count += 1
         if not evidence.validation_passed and evidence.validation_failure_reason is not None:
@@ -636,6 +868,9 @@ class ScoreboardOcrExtractor:
         reason_breakdown = ", ".join(
             f"{reason.value}={count}" for reason, count in sorted(self._validation_failure_counts.items(), key=lambda kv: kv[0].value)
         )
+        parser_strategy_breakdown = ", ".join(
+            f"{name}={count}" for name, count in sorted(self._parser_strategy_counts.items())
+        )
 
         output_summary = (
             f"frames_processed={self._frames_processed} "
@@ -646,6 +881,8 @@ class ScoreboardOcrExtractor:
             f"parse_confidence_zero_count={parse_failure_total} "
             f"validation_failure_breakdown=({reason_breakdown}) "
             f"roi_unchanged_skip_count={self._skipped_count} "
+            f"parser_strategy=({parser_strategy_breakdown}) "
+            f"generic_broadcast_unparsed_count={self._generic_broadcast_unparsed_count} "
             f"configuration_version=1"
         )
         return self._tracker.build(

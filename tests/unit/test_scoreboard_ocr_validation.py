@@ -13,7 +13,18 @@ import pytest
 from cvip.video.frame_extraction_models import FrameContext
 from cvip.video.loader import load_video
 from cvip.video.models import ContainerFormat, LoadResult, MatchVideoSource
-from cvip.video.scoreboard_ocr import ScoreboardOcrExtractor, _LastAcceptedReading, extract_scoreboard
+from cvip.video.scoreboard_ocr import (
+    _COMPOUND_SCORE_RE,
+    _STATS_MARKER_RE,
+    _LastAcceptedReading,
+    ClubBroadcastParser,
+    GenericBroadcastParser,
+    ScoreboardOcrExtractor,
+    _find_stats_marker_positions,
+    _select_parser,
+    _walk_name_fragment,
+    extract_scoreboard,
+)
 from cvip.video.scoreboard_ocr_errors import ScoreboardOcrError, ValidationFailureReason
 from cvip.video.scoreboard_ocr_models import ScoreboardOcrRequest, ScoreboardOcrResult, ScoreboardSample
 
@@ -636,6 +647,11 @@ def test_happy_path_parses_every_field_with_high_confidence():
         "batter": "Smith",
         "non_striker": "Jones",
         "bowler": "Kumar",
+        # specs/011-club-broadcast-overlay-support/ research.md Decision 4/6:
+        # GenericBroadcastParser's asterisk-backed batter is "verified",
+        # distinguishing it from ClubBroadcastParser's "best_effort".
+        "batter_attribution": "verified",
+        "parser_strategy": "generic_broadcast",
     }
     assert passed is True
     assert reason is None
@@ -747,3 +763,330 @@ def test_diagnostics_preserve_partial_progress_on_mid_run_failure(mocker):
     assert emit_spy.call_count == 1
     output_summary = emit_spy.call_args[0][0].output_summary
     assert "frames_processed=3" in output_summary
+
+
+# =============================================================================
+# specs/011-club-broadcast-overlay-support/: Club Broadcast Overlay Support
+# (Scoreboard OCR Amendment) -- see that feature's spec.md/research.md/
+# data-model.md for the full design. Token-list evidence below is drawn
+# directly from research.md's raw Tesseract capture against the real
+# fixture (First8Overs.mp4).
+# =============================================================================
+
+# The real evidence's token stream, reconstructed as (text, confidence)
+# pairs: two batters each immediately followed by a runs-and-balls stats
+# token (one joined, one split -- matching what Tesseract actually
+# produced), a multi-word team name that must NOT be mistaken for a player,
+# the compound score (with its observed stray leading "_"), and a bowler
+# immediately followed by their own stats token.
+CLUB_EVIDENCE_TOKENS = [
+    ("MAHESH", 90.0),
+    ("0", 85.0),
+    ("(0)", 80.0),
+    ("SAI", 88.0),
+    ("KRISHNA", 87.0),
+    ("0(0)", 84.0),
+    ("Chai", 70.0),
+    ("Cricket", 70.0),
+    ("Club", 70.0),
+    ("_0-0/0.0(20)", 92.0),
+    ("BHARATH", 89.0),
+    ("0-0(0)", 83.0),
+]
+
+
+# --- T006 (US1): _COMPOUND_SCORE_RE matching, including observed noise -----
+
+
+def test_compound_score_re_matches_via_search_tolerating_leading_noise():
+    assert _COMPOUND_SCORE_RE.search("_0-0/0.0(20)") is not None
+    assert _COMPOUND_SCORE_RE.search("0-0/0.0(20)") is not None
+
+
+def test_compound_score_re_rejects_score_without_trailing_total_overs():
+    assert _COMPOUND_SCORE_RE.search("0-0/0.0") is None
+
+
+# --- T007 (US1): compound score populates runs/wickets/over/ball -----------
+
+
+def test_compound_score_token_populates_score_fields_and_raw_token():
+    extractor = _make_extractor()
+
+    parsed, confidences = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+
+    assert parsed["runs"] == 0
+    assert parsed["wickets"] == 0
+    assert parsed["over_number"] == 0
+    assert parsed["ball_in_over"] == 0
+    assert parsed["raw_compound_score_token"] == "_0-0/0.0(20)"
+    assert parsed["parser_strategy"] == "club_broadcast"
+    assert confidences["runs"] == pytest.approx(0.92)
+
+
+# --- T008 (US1): original-format reading is unaffected (FR-002) -----------
+
+
+def test_original_format_reading_parses_identically_post_amendment():
+    extractor = _make_extractor()
+
+    parsed, confidences = extractor._parse_fields(HAPPY_PATH_TOKENS)
+
+    assert parsed["parser_strategy"] == "generic_broadcast"
+    assert parsed["runs"] == 125 and parsed["wickets"] == 3
+    assert parsed["over_number"] == 12 and parsed["ball_in_over"] == 3
+    assert parsed["batter"] == "Smith" and parsed["batter_attribution"] == "verified"
+    assert parsed["non_striker"] == "Jones"
+    assert parsed["bowler"] == "Kumar"
+
+
+# --- T009 (US1): _select_parser() selection and determinism ----------------
+
+
+def test_select_parser_picks_club_broadcast_when_compound_score_present():
+    selected = _select_parser(CLUB_EVIDENCE_TOKENS)
+    assert isinstance(selected, ClubBroadcastParser)
+
+
+def test_select_parser_picks_generic_broadcast_otherwise():
+    selected = _select_parser(HAPPY_PATH_TOKENS)
+    assert isinstance(selected, GenericBroadcastParser)
+
+
+def test_select_parser_is_deterministic_for_identical_tokens():
+    first = _select_parser(CLUB_EVIDENCE_TOKENS)
+    second = _select_parser(CLUB_EVIDENCE_TOKENS)
+    assert first is second  # _PARSERS entries are singletons, reused every call
+
+
+# --- T014 (US2): stats-marker detection, joined and split forms ------------
+
+
+def test_stats_marker_re_matches_joined_batter_and_bowler_shapes():
+    assert _STATS_MARKER_RE.match("0(0)") is not None
+    assert _STATS_MARKER_RE.match("0-0(0)") is not None
+    assert _STATS_MARKER_RE.match("MAHESH") is None
+
+
+def test_find_stats_marker_positions_detects_both_joined_and_split_forms():
+    # index 1 = split ("0" + "(0)"), index 5 = joined ("0(0)"), index 11 = joined ("0-0(0)")
+    positions = _find_stats_marker_positions(CLUB_EVIDENCE_TOKENS)
+    assert positions == [1, 5, 11]
+
+
+# --- T015 (US2): name-fragment walk joins multi-word names -----------------
+
+
+def test_walk_name_fragment_joins_consecutive_alphabetic_tokens():
+    name, confidence = _walk_name_fragment(CLUB_EVIDENCE_TOKENS, anchor_index=5)
+    assert name == "SAI KRISHNA"
+    assert confidence == pytest.approx(87.0)
+
+
+def test_walk_name_fragment_returns_none_with_no_preceding_name():
+    name_and_conf = _walk_name_fragment([("0(0)", 80.0)], anchor_index=0)
+    assert name_and_conf is None
+
+
+# --- T016 (US2): batter/non_striker populate, team-name excluded -----------
+
+
+def test_club_broadcast_batter_and_non_striker_populate_excluding_team_name():
+    extractor = _make_extractor()
+
+    parsed, _ = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+
+    assert parsed["batter"] == "MAHESH"
+    assert parsed["non_striker"] == "SAI KRISHNA"
+    for team_fragment in ("Chai", "Cricket", "Club"):
+        assert parsed["batter"] != team_fragment
+        assert parsed["non_striker"] != team_fragment
+        assert parsed.get("bowler") != team_fragment
+
+
+# --- T017 (US2): batter_attribution best_effort vs verified ----------------
+
+
+def test_club_broadcast_batter_attribution_is_best_effort():
+    extractor = _make_extractor()
+
+    parsed, _ = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+
+    assert parsed["batter_attribution"] == "best_effort"
+
+
+def test_generic_broadcast_batter_attribution_is_verified():
+    extractor = _make_extractor()
+
+    parsed, _ = extractor._parse_fields(HAPPY_PATH_TOKENS)
+
+    assert parsed["batter_attribution"] == "verified"
+
+
+# --- T018 (US2): no locatable name still yields PLAYER_PARSE_FAILED --------
+
+
+def test_club_broadcast_reading_with_no_locatable_name_yields_player_parse_failed():
+    extractor = _make_extractor()
+    tokens = [("_0-0/0.0(20)", 90.0)]  # score only, no adjacent name anywhere
+
+    parsed, _ = extractor._parse_fields(tokens)
+    passed, reason = extractor._validate_reading(parsed, _LastAcceptedReading())
+
+    assert parsed.get("batter") is None
+    assert passed is False
+    assert reason == ValidationFailureReason.PLAYER_PARSE_FAILED
+
+
+# --- T019 (US2, analysis finding C1): shared validation is parser-agnostic -
+
+
+def test_shared_validation_fires_runs_decreased_for_a_club_broadcast_reading():
+    """FR-009: _validate_reading() must apply the same monotonic-rule check
+    to a ClubBroadcastParser-produced reading as to a GenericBroadcastParser
+    one -- parser strategy has no influence on rule-validation behavior."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=10, wickets=0, over_number=1, ball_in_over=0)
+
+    club_reading, _ = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+    club_reading = dict(club_reading, runs=8)  # intentionally violates the monotonic-runs rule
+
+    passed, reason = extractor._validate_reading(club_reading, baseline)
+
+    assert passed is False
+    assert reason == ValidationFailureReason.RUNS_DECREASED
+
+
+def test_shared_validation_fires_invalid_over_sequence_for_a_club_broadcast_reading():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=10, wickets=0, over_number=5, ball_in_over=0)
+
+    club_reading, _ = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+    club_reading = dict(club_reading, runs=15, over_number=3)  # invalid regression
+
+    passed, reason = extractor._validate_reading(club_reading, baseline)
+
+    assert passed is False
+    assert reason == ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+
+# --- T025 (US3): bowler populates without a label ---------------------------
+
+
+def test_club_broadcast_bowler_populates_from_post_score_stats_marker():
+    extractor = _make_extractor()
+
+    parsed, confidences = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+
+    assert parsed["bowler"] == "BHARATH"
+    assert confidences["bowler"] == pytest.approx(0.89)
+
+
+# --- T026 (US3): original-format label-based bowler extraction unaffected --
+
+
+def test_generic_broadcast_bowler_still_requires_a_label():
+    extractor = _make_extractor()
+
+    parsed, _ = extractor._parse_fields(HAPPY_PATH_TOKENS)
+
+    assert parsed["bowler"] == "Kumar"
+    # No stray B:-label logic leaks into a token list with no compound score.
+    assert "raw_compound_score_token" not in parsed
+
+
+# --- T029/T031 (Polish, research.md Decision 8): parser-strategy diagnostics
+
+
+def test_parser_strategy_counters_increment_on_record_stats():
+    extractor = _make_extractor()
+    club_parsed, club_confidences = extractor._parse_fields(CLUB_EVIDENCE_TOKENS)
+    club_passed, club_reason = extractor._validate_reading(club_parsed, _LastAcceptedReading())
+    from cvip.video.scoreboard_ocr_models import OCREvidence
+
+    club_sample = ScoreboardSample(
+        timestamp_seconds=0.0, runs=club_parsed.get("runs"), wickets=club_parsed.get("wickets"),
+        over_number=club_parsed.get("over_number"), ball_in_over=club_parsed.get("ball_in_over"),
+        batter=club_parsed.get("batter"), non_striker=club_parsed.get("non_striker"),
+        bowler=club_parsed.get("bowler"), run_rate=club_parsed.get("run_rate"),
+        raw_text="", ocr_confidence=0.9, parse_confidence=1.0 if club_passed else 0.0,
+    )
+    club_evidence = OCREvidence(
+        raw_text="", preprocessed_image_ref=None, ocr_confidence=0.9,
+        field_confidences=club_confidences, parsed_fields=club_parsed,
+        validation_passed=club_passed, validation_failure_reason=club_reason,
+    )
+
+    extractor._record_stats(club_sample, club_evidence)
+
+    assert extractor._parser_strategy_counts["club_broadcast"] == 1
+    assert extractor._parser_strategy_counts["generic_broadcast"] == 0
+
+
+def test_diagnostics_output_summary_contains_parser_strategy_breakdown_for_mixed_run(mocker):
+    """T032: a run whose readings alternate between original-format and
+    club-broadcast-format tokens -- each is independently and correctly
+    classified/parsed (spec.md Edge Cases), and the diagnostics summary
+    (research.md Decision 8) reflects both strategies' usage counts."""
+    load_result = _dummy_load_result(duration_seconds=2.0)
+    # Deliberately different-content ROIs (not just +1) -- otherwise the
+    # ROI-unchanged skip (research.md Decision 1) would reuse the first
+    # frame's sample for the second, defeating this test's whole point.
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=0, timestamp_seconds=0.0, frame=_solid_frame(50)),
+        FrameContext(source_video_id="deadbeef", frame_index=1, timestamp_seconds=1.0, frame=_solid_frame(200)),
+    ]
+    mocker.patch("cvip.video.scoreboard_ocr.extract_frames", return_value=_FakeFrameExtractor(frames))
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        side_effect=[_tesseract_data(HAPPY_PATH_TOKENS), _tesseract_data(CLUB_EVIDENCE_TOKENS)],
+    )
+    emit_spy = mocker.patch("cvip.video.scoreboard_ocr.emit_diagnostics")
+
+    request = ScoreboardOcrRequest(load_result=load_result, **DEFAULT_REQUEST_KWARGS)
+    with extract_scoreboard(request) as extractor:
+        result = extractor.run()
+
+    assert result.samples[0].batter == "Smith"  # generic_broadcast reading
+    assert result.samples[1].batter == "MAHESH"  # club_broadcast reading
+
+    output_summary = emit_spy.call_args[0][0].output_summary
+    assert "parser_strategy=(club_broadcast=1, generic_broadcast=1)" in output_summary
+    assert "generic_broadcast_unparsed_count=" in output_summary
+
+
+# --- T033 coverage gate: critical-path branches not exercised above --------
+
+
+def test_club_broadcast_stats_marker_with_no_preceding_name_is_skipped():
+    """A stats marker with no name-shaped token immediately preceding it
+    (e.g. a garbled reading that dropped the name entirely) must simply be
+    skipped, not raise or fabricate a name."""
+    extractor = _make_extractor()
+    tokens = [("0(0)", 80.0), ("0-0/0.0(20)", 92.0)]
+
+    parsed, _ = extractor._parse_fields(tokens)
+
+    assert parsed.get("batter") is None
+    assert parsed["parser_strategy"] == "club_broadcast"
+
+
+def test_select_parser_raises_if_no_parser_matches(mocker):
+    """Defensive invariant: `_select_parser()` only ever raises if
+    `_PARSERS` were misconfigured without a universal fallback -- not
+    reachable via the real `_PARSERS` tuple (`GenericBroadcastParser`
+    always matches), so this is exercised via a monkeypatched registry."""
+    import cvip.video.scoreboard_ocr as scoreboard_ocr_module
+
+    class _NeverMatches:
+        name = "never_matches"
+
+        def matches(self, tokens):
+            return False
+
+    mocker.patch.object(scoreboard_ocr_module, "_PARSERS", (_NeverMatches(),))
+
+    with pytest.raises(AssertionError):
+        scoreboard_ocr_module._select_parser([("anything", 90.0)])

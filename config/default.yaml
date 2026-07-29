@@ -36,16 +36,21 @@ events:
   pre_roll_seconds: 8
   post_roll_seconds: 12
   merge_gap_seconds: 3
+  # TEAM_MILESTONE fires each time the batting team's runs total crosses a
+  # multiple of this interval (specs/007-event-detection/spec.md FR-008).
+  team_milestone_interval: 50
   # Only event types Module 5 (Event Detection) can currently emit.
   # Do NOT add HAT_TRICK, MATCH_WINNING_SHOT, RUN_OUT, CATCH, or GREAT_FIELDING
   # back here until a dismissal-type/fielder-attribution data source is designed
   # (see specs/technical_plan.md "Event Taxonomy & Detectability") -- their
   # presence previously implied detectability the pipeline doesn't have.
+  # Do NOT add FIFTY or CENTURY back here either until per-batter running-score
+  # extraction exists -- Module 4/4a only ever provide the team total, not an
+  # individual batter's own score, so these two cannot currently be derived
+  # (see specs/technical_plan.md "Event Taxonomy & Detectability").
   ranking:
-    CENTURY: 95
     WICKET: 95
     SIX: 80
-    FIFTY: 75
     TEAM_MILESTONE: 65
     FOUR: 60
 

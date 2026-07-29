@@ -111,8 +111,15 @@ class ClipGeneratorRunner:
             raw_end = event.timestamp_seconds + request.post_roll_seconds
             self._clip_windows_generated += 1
 
-            clamped_start = max(0.0, raw_start)
-            clamped_end = min(request.video_duration_seconds, raw_end)
+            # Clamp both bounds on both sides -- an event far enough outside
+            # [0, video_duration_seconds] would otherwise clamp only its
+            # "near" side (e.g. a timestamp beyond the video's end clamps
+            # clamped_start up to video_duration_seconds via the first
+            # min(), while clamped_end is separately capped at the same
+            # value), producing an inverted clamped_start > clamped_end
+            # window that corrupts downstream duration/merge math.
+            clamped_start = min(max(0.0, raw_start), request.video_duration_seconds)
+            clamped_end = max(min(request.video_duration_seconds, raw_end), 0.0)
 
             excluded = event.is_replay and not request.include_replays
             evidence = ClipEvidence(
@@ -268,7 +275,13 @@ class ClipGeneratorRunner:
             ("post_roll_seconds", request.post_roll_seconds),
             ("merge_gap_seconds", request.merge_gap_seconds),
         ):
-            if value is None or isinstance(value, bool) or not math.isfinite(value) or value < 0:
+            if (
+                value is None
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
                 self._fail(
                     ClipGenerationFailureReason.INVALID_CLIP_CONFIGURATION,
                     f"{name} {value!r} must be a finite number >= 0",

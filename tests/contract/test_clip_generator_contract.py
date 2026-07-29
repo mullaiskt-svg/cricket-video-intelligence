@@ -77,6 +77,11 @@ def test_missing_source_video_path_yields_invalid_input_before_processing():
         ("merge_gap_seconds", -1.0),
         ("video_duration_seconds", float("nan")),
         ("video_duration_seconds", float("inf")),
+        # Non-numeric values must be rejected through the typed failure path
+        # (ClipGenerationError/INVALID_CLIP_CONFIGURATION), not crash with a
+        # raw TypeError out of math.isfinite().
+        ("video_duration_seconds", "not-a-number"),
+        ("merge_gap_seconds", None),
     ],
 )
 def test_invalid_clip_configuration_yields_invalid_clip_configuration_before_processing(field_name, invalid_value):

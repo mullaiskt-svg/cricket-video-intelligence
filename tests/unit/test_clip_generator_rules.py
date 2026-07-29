@@ -61,6 +61,36 @@ def test_clip_end_clamped_to_video_duration_when_raw_end_exceeds_it():
     assert plan.clips[0].clip_end_seconds == 3600.0
 
 
+def test_clip_window_wholly_beyond_video_duration_is_not_inverted():
+    # timestamp=1000 with an 8s/12s pre/post-roll against a 100s video: the
+    # raw window [992,1012] falls entirely past video_duration_seconds, so
+    # clamping only clip_start_seconds's lower bound and clip_end_seconds's
+    # upper bound (single-sided) would otherwise produce clip_start=992,
+    # clip_end=100 -- an inverted window (start > end).
+    request = _request([_Event("e1", 1000.0)], video_duration_seconds=100.0)
+    with generate_clips(request) as runner:
+        plan = runner.run()
+
+    clip = plan.clips[0]
+    assert clip.clip_start_seconds <= clip.clip_end_seconds
+    assert 0.0 <= clip.clip_start_seconds <= 100.0
+    assert 0.0 <= clip.clip_end_seconds <= 100.0
+
+
+def test_clip_window_wholly_before_zero_is_not_inverted():
+    # timestamp=-1000 with a 12s post-roll: raw_end=-988, entirely before 0
+    # -- single-sided clamping would leave clip_end_seconds negative while
+    # clip_start_seconds clamps to 0, again inverting the window.
+    request = _request([_Event("e1", -1000.0)], video_duration_seconds=3600.0)
+    with generate_clips(request) as runner:
+        plan = runner.run()
+
+    clip = plan.clips[0]
+    assert clip.clip_start_seconds <= clip.clip_end_seconds
+    assert 0.0 <= clip.clip_start_seconds <= 3600.0
+    assert 0.0 <= clip.clip_end_seconds <= 3600.0
+
+
 def test_empty_input_event_list_yields_valid_empty_clip_plan():
     request = _request([])
     with generate_clips(request) as runner:

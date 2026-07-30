@@ -56,6 +56,7 @@ class FrameExtractor:
         self._progress = ExtractionProgress()
         self._targets: List[int] = []
         self._target_pos = 0
+        self._last_retrieved_index: Optional[int] = None
 
     def __enter__(self) -> "FrameExtractor":
         return self
@@ -245,8 +246,28 @@ class FrameExtractor:
         capture = self._capture
         assert capture is not None  # _start() always sets this before targets are consumed
 
+        # Performance-critical (found via real-footage profiling, not
+        # theoretical): `cap.set(CAP_PROP_POS_FRAMES, i)` is a genuine seek
+        # on most OpenCV/FFmpeg backends -- even when `i` is exactly the
+        # next frame after the one just read, it re-seeks to the nearest
+        # preceding keyframe and re-decodes forward to `i`, rather than
+        # continuing the decode it was already mid-stream on. For
+        # SamplingMode.FULL (every consecutive frame -- Scene Detection's
+        # own mode), this made every single frame retrieval pay a keyframe-
+        # interval's worth of wasted re-decoding, measured at ~7.5 fps on
+        # real 720p/30fps footage (a 40-minute match would have taken
+        # ~2.5 hours for this stage alone -- see specs/003-scene-detection/
+        # research.md's "post-implementation" note). Skipping the redundant
+        # `.set()` when the capture is already positioned to read exactly
+        # this frame (immediately following the last one actually
+        # retrieved) restores plain sequential decoding for that case;
+        # any non-sequential target (a real jump, or the very first frame
+        # of a run) still seeks explicitly, unchanged.
+        needs_seek = target_index != self._last_retrieved_index + 1 if self._last_retrieved_index is not None else True
+
         try:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, target_index)
+            if needs_seek:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, target_index)
             decoded, frame = capture.read()
         except (OSError, cv2.error) as exc:
             self._fail(ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN, str(exc))
@@ -262,6 +283,8 @@ class FrameExtractor:
             timestamp_seconds = capture.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
         except (OSError, cv2.error) as exc:
             self._fail(ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN, str(exc))
+
+        self._last_retrieved_index = actual_index if actual_index >= 0 else target_index
 
         source = self._request.load_result.source
         return FrameContext(

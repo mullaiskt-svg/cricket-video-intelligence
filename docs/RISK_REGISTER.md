@@ -51,6 +51,8 @@ Mitigation:
 - Cache intermediate artifacts
 - Add benchmark suite early
 
+**Confirmed, partially fixed (real-video validation, `specs/011-club-broadcast-overlay-support/`)**: Scene Detection (Module 2) uses `SamplingMode.FULL` (every frame at native rate, not 1 FPS) and was measured at 7.5 fps on real 720p/30fps footage — ~159 minutes extrapolated for a single 40-minute match, before any other pipeline stage. Root cause: the Frame Extraction Service's `_retrieve_frame()` re-seeked (`cap.set(CAP_PROP_POS_FRAMES, ...)`) before every read, even for consecutive frames -- invisible to Scene Detection's own benchmark, which uses a synthetic 320x240/10fps solid-black fixture (`multi_hour.mp4`) that doesn't exercise real seek/decode cost. Fixed in `src/cvip/video/frame_extraction.py` by skipping the redundant seek for sequential reads: 3.4x improvement (7.5 -> 25.6 fps), extrapolated full-match time down to ~46.5 minutes for Scene Detection alone. **Still likely over the 40-minute whole-pipeline budget on its own** -- the remaining per-frame cost (PySceneDetect's `ContentDetector`, or native H.264 decode cost at full frame rate) was not further profiled; needs its own follow-up investigation before this risk can be considered closed. Also flagged: **benchmark fixtures across this codebase should be checked for the same synthetic-content blind spot** (cheap-to-decode, low-res/low-motion content passing a time budget that real broadcast footage would not).
+
 ## R4: Fielding Detection Complexity
 Severity: Medium
 Likelihood: High

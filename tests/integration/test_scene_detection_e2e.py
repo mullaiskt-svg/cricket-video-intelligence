@@ -417,19 +417,29 @@ def test_ordinary_cut_and_replay_transition_classified_distinctly(mocker):
         frames.append(
             FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / fps, frame=_solid_frame(255))
         )
-    # Replay-style transition: a sharp cut-in followed by a *gradual* ramp
-    # back to baseline (simulating a dissolve/wipe), rather than repeated
-    # full-range 0/255 inversions. Post-implementation amendment: with
-    # AdaptiveDetector (real-video finding, specs/003-scene-detection/
-    # research.md), a burst of consecutive large jumps suppresses itself --
-    # each jump's own local neighborhood (window_width=2 frames either
-    # side) is *also* full of other large jumps, so its score-vs-neighborhood
-    # ratio collapses well below adaptive_threshold even though each jump's
-    # raw magnitude is large. This is intentional, correct behavior (the
-    # same mechanism that avoids false positives from camera motion), not a
-    # regression -- a real dissolve ramps smoothly rather than strobing
-    # between extremes, so this fixture now reflects that instead.
-    steps = [0, 60, 120, 180, 120, 60, 0]
+    # Replay-style transition: a sharp cut-in followed by several more
+    # frames of comparably large (but not full-range) swings, rather than
+    # repeated full-range 0/255 inversions. Post-implementation amendment
+    # (PR review finding): with AdaptiveDetector, a burst of consecutive
+    # large jumps of *equal* magnitude suppresses itself in PySceneDetect's
+    # own cut detection -- each jump's own local neighborhood (window_width=2
+    # frames either side) is also full of other large jumps, so its
+    # score-vs-neighborhood ratio collapses. This is intentional, correct
+    # behavior (the same mechanism that avoids false positives from camera
+    # motion), not a regression. Separately, this module's own
+    # classification heuristic (_classify()) compares each post-cut frame's
+    # diff score against the *initiating cut's own* diff score (cut_score) --
+    # a correctness fix (recovering AdaptiveDetector's true, possibly-delayed
+    # cut frame and its real score, instead of the current frame's, per the
+    # same PR review finding) means cut_score here is now the full 0->255
+    # jump (255), so the follow-up steps must individually clear
+    # RAMP_ELEVATED_FRACTION (0.25) of *that* magnitude (>=63.75) to read as
+    # sustained post-cut evidence -- 75 was chosen empirically (verified
+    # against the real AdaptiveDetector, not just _classify() in isolation)
+    # for a comfortable margin above that bar, while AdaptiveDetector still
+    # reports the ramp's entry (frame 60) as a single cut, not an additional
+    # one partway through.
+    steps = [0, 75, 150, 225, 150, 75, 0]
     for j, value in enumerate(steps):
         i = 60 + j
         frames.append(

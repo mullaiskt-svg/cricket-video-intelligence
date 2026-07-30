@@ -326,6 +326,213 @@ def test_ball_in_over_reset_on_a_new_over_is_accepted():
     assert reason is None
 
 
+# --- Post-implementation fix: implausible over_number is rejected, not --
+# --- accepted-and-baseline-poisoning (real-video finding, PLATINUM CUP  --
+# --- FINAL full-match validation) ----------------------------------------
+
+
+def test_implausibly_large_over_number_is_rejected_not_accepted():
+    """A garbled OCR frame that coincidentally matches the generic
+    over.ball token shape against unrelated on-screen text (e.g. a clock
+    display) must not be accepted just because it isn't a *decrease*
+    relative to the baseline -- an absolute sanity ceiling is needed too,
+    or a single such frame poisons the baseline for the rest of the
+    innings (real match: over_number=600 accepted, then ~14 legitimate
+    overs' worth of readings rejected as INVALID_OVER_SEQUENCE against
+    that corrupted baseline)."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=37, wickets=2, over_number=5, ball_in_over=2)
+
+    passed, reason = extractor._validate_reading({"over_number": 600, "ball_in_over": 0}, baseline)
+
+    assert passed is False
+    assert reason == ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+
+def test_implausibly_large_over_number_does_not_poison_the_baseline():
+    """The concrete failure mode this fix targets: confirm a bogus,
+    rejected over_number=600 reading leaves the baseline untouched, so the
+    NEXT genuine reading (a real over 6) still validates correctly against
+    the real baseline rather than against a corrupted one."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=37, wickets=2, over_number=5, ball_in_over=2)
+
+    passed, _ = extractor._validate_reading({"over_number": 600, "ball_in_over": 0}, baseline)
+    assert passed is False
+    # _validate_reading() is a pure predicate -- baseline.update() is only
+    # ever called by _process_frame() when validation_passed is True, so a
+    # rejected reading like this one never reaches it. Confirm the baseline
+    # itself is still exactly where it was before this rejected reading.
+    assert baseline.over_number == 5
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 38, "wickets": 2, "over_number": 6, "ball_in_over": 1}, baseline
+    )
+    assert passed is True
+    assert reason is None
+
+
+def test_over_number_at_the_sanity_ceiling_is_still_accepted():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=50, wickets=2, over_number=49, ball_in_over=0)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 51, "wickets": 2, "over_number": 50, "ball_in_over": 1}, baseline
+    )
+
+    assert passed is True
+    assert reason is None
+
+
+# --- Post-implementation fix: an over/ball-only reading (no accompanying --
+# --- runs/wickets) must not advance the baseline's over_number/ball_in_over
+# --- (real-video finding, PLATINUM CUP FINAL full-match validation) -----
+
+
+def test_over_only_update_without_runs_and_wickets_does_not_advance_baseline():
+    """A reading with over_number/ball_in_over but no runs/wickets can only
+    have come from the generic parser's standalone over.ball token regex
+    matching in isolation -- no compound-score evidence backs it up. It
+    must not be trusted to advance the baseline, or a single spurious
+    match (unrelated on-screen text coincidentally shaped like "N.M")
+    silently jumps the baseline ahead of where the game actually is,
+    causing every subsequent genuine reading to be rejected as an
+    over-number decrease."""
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=5, wickets=2, over_number=1, ball_in_over=0)
+
+    baseline.update(runs=None, wickets=None, over_number=5, ball_in_over=0)
+
+    assert baseline.over_number == 1
+    assert baseline.ball_in_over == 0
+    assert baseline.runs == 5
+    assert baseline.wickets == 2
+
+
+def test_over_and_ball_advance_together_with_runs_and_wickets():
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=5, wickets=2, over_number=1, ball_in_over=0)
+
+    baseline.update(runs=9, wickets=2, over_number=1, ball_in_over=3)
+
+    assert baseline.over_number == 1
+    assert baseline.ball_in_over == 3
+    assert baseline.runs == 9
+
+
+def test_over_only_reading_does_not_poison_subsequent_validation():
+    """End-to-end version of the baseline-corruption scenario: confirm a
+    genuine next-ball reading (over=1, ball=2) still validates correctly
+    after an over-only spurious reading (over=5) was fed through the same
+    baseline -- it must not be rejected as INVALID_OVER_SEQUENCE against a
+    corrupted baseline."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=5, wickets=2, over_number=1, ball_in_over=0)
+
+    # A spurious over.ball-only reading -- passes _validate_reading() (it's
+    # not a decrease, and has_any_score_field is satisfied by over_number
+    # alone), but must not corrupt the baseline via _LastAcceptedReading.update().
+    passed, _ = extractor._validate_reading({"over_number": 5, "ball_in_over": 0}, baseline)
+    assert passed is True
+    baseline.update(runs=None, wickets=None, over_number=5, ball_in_over=0)
+    assert baseline.over_number == 1  # unchanged
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 9, "wickets": 2, "over_number": 1, "ball_in_over": 2}, baseline
+    )
+    assert passed is True
+    assert reason is None
+
+
+# --- Post-implementation fix: an implausible single-reading runs increase -
+# --- is rejected even when it isn't a decrease and over/ball are in-range -
+# --- (real-video finding, PLATINUM CUP FINAL: a single Tesseract-inserted -
+# --- digit turned a real "31-3/6.1(20)" into "311-3/6.1(20)") ------------
+
+
+def test_implausible_runs_jump_on_the_same_ball_is_rejected():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=31, wickets=3, over_number=6, ball_in_over=1)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 311, "wickets": 3, "over_number": 6, "ball_in_over": 1}, baseline
+    )
+
+    assert passed is False
+    assert reason == ValidationFailureReason.RUNS_DECREASED
+
+
+def test_implausible_runs_jump_does_not_poison_the_baseline():
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=31, wickets=3, over_number=6, ball_in_over=1)
+
+    passed, _ = extractor._validate_reading(
+        {"batter": "Smith", "runs": 311, "wickets": 3, "over_number": 6, "ball_in_over": 1}, baseline
+    )
+    assert passed is False
+    assert baseline.runs == 31  # _validate_reading is a pure predicate; unchanged
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 32, "wickets": 3, "over_number": 6, "ball_in_over": 2}, baseline
+    )
+    assert passed is True
+    assert reason is None
+
+
+def test_large_runs_jump_across_a_genuine_over_advance_is_accepted():
+    """A large jump is only suspect on the *same* ball -- once over_number
+    (or ball_in_over) has genuinely advanced, no magnitude cap applies, so
+    a big catch-up jump after a real sampling gap spanning several
+    deliveries must still be accepted."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=30, wickets=3, over_number=6, ball_in_over=0)
+
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 62, "wickets": 3, "over_number": 8, "ball_in_over": 0}, baseline
+    )
+
+    assert passed is True
+    assert reason is None
+
+
+def test_recovery_jump_after_a_false_innings_transition_is_not_blocked():
+    """The concrete interaction this design avoids: FR-014's innings-
+    transition heuristic occasionally misfires on a garbled mid-innings
+    reading (both runs and wickets coincidentally drop together),
+    temporarily resetting the baseline to an artificially low value. The
+    very next genuinely correct reading then needs a large catch-up jump
+    to get back to the true score -- an earlier magnitude-based version of
+    this fix wrongly blocked that recovery. Since the over_number has
+    genuinely advanced across this gap, the same-ball check must not
+    apply here."""
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    baseline.update(runs=69, wickets=4, over_number=12, ball_in_over=2)
+
+    # A garbled reading coincidentally drops both runs and wickets --
+    # FR-014 suppresses the monotonic checks for this one comparison,
+    # treating it as a possible innings transition.
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 8, "wickets": 3, "over_number": 9, "ball_in_over": 2}, baseline
+    )
+    assert passed is True
+    baseline.update(runs=8, wickets=3, over_number=9, ball_in_over=2)
+
+    # The next genuinely correct reading must recover, not be rejected.
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 69, "wickets": 4, "over_number": 12, "ball_in_over": 2}, baseline
+    )
+    assert passed is True
+    assert reason is None
+
+
 # --- FR-014: innings-transition heuristic ------------------------------------
 
 

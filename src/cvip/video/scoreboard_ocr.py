@@ -51,9 +51,26 @@ SAMPLING_RATE_FPS = 1.0
 # golden dataset yet); tune here if real broadcast footage shows it's wrong.
 ROI_UNCHANGED_TOLERANCE = 2.0
 
-# Valid ranges for the two count-like fields (spec.md Assumptions).
+# Valid ranges for the count-like fields (spec.md Assumptions).
 WICKETS_MAX = 10
 BALL_IN_OVER_MAX = 6
+
+# Post-implementation fix (specs/011-club-broadcast-overlay-support/'s
+# full-match real-video validation, PLATINUM CUP FINAL): over_number had no
+# sanity ceiling, unlike wickets/ball_in_over above. A single garbled OCR
+# frame produced a bogus over_number in the hundreds (a misread of unrelated
+# on-screen text coincidentally matching the generic over.ball token shape)
+# that passed validation -- nothing in range [0, over_number_max] rejects
+# it, and it isn't a decrease relative to the real baseline. That one
+# accepted reading then became the new baseline, and every subsequent
+# genuine reading for the rest of the innings was rejected as
+# INVALID_OVER_SEQUENCE (over_number always less than the corrupted
+# baseline) -- one bad frame silently blacked out ~74 minutes / ~14 overs
+# of an otherwise fully-readable innings. No format on this platform's
+# roadmap runs beyond 50 overs; this ceiling exists purely to catch
+# obviously-impossible values, not to encode a specific match format.
+OVER_NUMBER_MAX = 50
+
 
 # Tesseract's own confidence scale is 0-100; this platform's confidence
 # fields are always 0.0-1.0.
@@ -331,7 +348,24 @@ class _LastAcceptedReading:
     (FR-012, FR-013, FR-014) -- only the most recent *accepted* reading's
     numeric fields, updated in place. A field left `None` on an otherwise
     accepted reading does not overwrite the tracked value for that field,
-    so a partially-parsed reading can't corrupt future comparisons."""
+    so a partially-parsed reading can't corrupt future comparisons.
+
+    Post-implementation fix (specs/011-club-broadcast-overlay-support/'s
+    full-match real-video validation, PLATINUM CUP FINAL): `over_number`/
+    `ball_in_over` only advance the baseline when `runs` and `wickets` are
+    ALSO present in that same call. The compound-score parser always
+    produces all four fields atomically (one regex match, one token) or
+    none at all -- a reading with `over_number` set but `runs`/`wickets`
+    both `None` can only have come from the generic parser's standalone
+    `over.ball` token regex, which matches any "N.M"-shaped token in
+    isolation and has no accompanying score context to corroborate it.
+    Without this gate, one such spurious match (e.g. unrelated on-screen
+    UI text coincidentally shaped like "5.0") silently advances
+    `over_number` ahead of where the game actually is, and every
+    genuinely correct subsequent reading gets rejected as an over-number
+    decrease relative to that now-corrupted baseline -- the same failure
+    mode `OVER_NUMBER_MAX` guards against for wildly-out-of-range values,
+    but for small, individually-plausible ones that ceiling can't catch."""
 
     def __init__(self) -> None:
         self.runs: Optional[int] = None
@@ -350,10 +384,11 @@ class _LastAcceptedReading:
             self.runs = runs
         if wickets is not None:
             self.wickets = wickets
-        if over_number is not None:
-            self.over_number = over_number
-        if ball_in_over is not None:
-            self.ball_in_over = ball_in_over
+        if runs is not None and wickets is not None:
+            if over_number is not None:
+                self.over_number = over_number
+            if ball_in_over is not None:
+                self.ball_in_over = ball_in_over
 
 
 class ScoreboardOcrExtractor:
@@ -698,6 +733,38 @@ class ScoreboardOcrExtractor:
 
         if wickets is not None and not (0 <= wickets <= WICKETS_MAX):
             return False, ValidationFailureReason.WICKETS_DECREASED
+
+        if over_number is not None and not (0 <= over_number <= OVER_NUMBER_MAX):
+            return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+        # Post-implementation fix (specs/011-.../real-video validation,
+        # PLATINUM CUP FINAL): a single-digit OCR misread within an
+        # otherwise atomic compound-score match (e.g. real "31-3/6.1(20)"
+        # misread as "311-3/6.1(20)") is neither a decrease nor an
+        # out-of-range value, so nothing above catches it. A reading
+        # claiming the exact same ball (over_number AND ball_in_over both
+        # unchanged from baseline) is describing the same historical
+        # instant in the match -- its runs value must match what was
+        # already recorded there; a magnitude-based cap was tried first
+        # and rejected (it also blocked a legitimate large catch-up jump
+        # elsewhere, when the innings-transition heuristic below
+        # occasionally misfires on a garbled reading and temporarily
+        # resets the baseline low -- FR-014's own documented trade-off).
+        # This same-ball check can never conflict with that recovery,
+        # since a genuine catch-up jump always comes with the over/ball
+        # having also advanced.
+        if (
+            runs is not None
+            and baseline.runs is not None
+            and over_number is not None
+            and baseline.over_number is not None
+            and over_number == baseline.over_number
+            and ball_in_over is not None
+            and baseline.ball_in_over is not None
+            and ball_in_over == baseline.ball_in_over
+            and runs != baseline.runs
+        ):
+            return False, ValidationFailureReason.RUNS_DECREASED
 
         # No outer "has a prior reading at all" gate is needed here: every
         # comparison below already guards on `baseline.<field> is not None`

@@ -34,6 +34,11 @@ Mitigation:
 - User-configurable replay inclusion
 - Manual override support
 
+**Confirmed via real-video validation** (`specs/011-club-broadcast-overlay-support/`, against First8Overs.mp4), three compounding problems, one fixed:
+1. **Fixed**: `config/default.yaml`'s original weights (`logo=0.35`) plus `confidence_threshold=0.65` left a maximum achievable combined confidence of 0.50-0.65 depending on scenario whenever no logo template is configured (the common case) and Scene Detection's `REPLAY_TRANSITION` heuristic doesn't fire (e.g. a hard, non-ramping cut) — detection was mathematically unreachable, not merely insensitive. Weights rebalanced (`logo=0.15, scoreboard=0.25, motion=0.25, transition=0.20, camera_angle=0.15`), threshold lowered to `0.50` — see `config/default.yaml`'s own comment and `specs/004-replay-detection/spec.md`'s Assumptions.
+2. **Still open**: Scene Detection found only 3 boundaries across 15 minutes of real footage (`scene_threshold=27.0`, or `ContentDetector` itself, appears far too insensitive for this broadcast's actual cut frequency). Since Replay Detection's candidate segments are the spans *between* Scene Detection's boundaries, a real ~25s replay ended up merged into a 104-second candidate segment alongside ~80s of live action — diluting any distinguishing signal below any reasonable threshold regardless of the weight fix above. This is the dominant remaining blocker and needs its own investigation (tune `scene_threshold`, or examine why `ContentDetector` misses obvious real cuts).
+3. **Still open, secondary**: the Live-Action Baseline Tracker needs 3 prior confirmed-live segments before it stops returning neutral (0.5) placeholder scores for scoreboard/motion/camera-angle deviation — with boundaries as sparse as (2), a segment can be scored before the baseline ever warms up. Likely resolves naturally once (2) is fixed and segments become more numerous/shorter, but not independently confirmed.
+
 ## R3: Performance on Low-End CPU
 Severity: High
 Likelihood: Medium

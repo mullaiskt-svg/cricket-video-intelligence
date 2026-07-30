@@ -84,8 +84,15 @@ def test_cut_near_end_of_stream_is_still_flushed_and_classified(mocker):
     rather than silently dropped."""
     frames = _three_segment_frame_contexts(segment_frames=40)
     # Truncate right after the second cut (around frame 80), leaving fewer
-    # than POST_CUT_WINDOW=3 frames for its post-cut window.
-    frames = frames[:82]
+    # than POST_CUT_WINDOW=3 frames for its post-cut window. AdaptiveDetector
+    # (post-implementation amendment) needs window_width=2 frames of its own
+    # trailing context before it reports a cut at all (post_process() is a
+    # deliberate no-op -- a cut without enough future context is never
+    # recovered, by design); frames[:85] gives it exactly that (up through
+    # frame 82) plus 2 more (83, 84) for this module's own post-cut window --
+    # still short of POST_CUT_WINDOW=3, preserving this test's original
+    # "partial window still gets flushed" intent.
+    frames = frames[:85]
     mocker.patch(
         "cvip.video.scene_detection.extract_frames",
         return_value=_FakeFrameExtractor(frames),
@@ -124,7 +131,7 @@ def test_cut_frame_number_other_than_current_uses_correct_timestamp(mocker):
         return [3] if frame_num == 5 else []
 
     mock_detector_instance.process_frame.side_effect = fake_process_frame
-    mocker.patch("cvip.video.scene_detection.ContentDetector", return_value=mock_detector_instance)
+    mocker.patch("cvip.video.scene_detection.AdaptiveDetector", return_value=mock_detector_instance)
 
     load_result = _load("valid_short.mp4")
     request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
@@ -152,6 +159,36 @@ def test_boundary_ids_are_unique_within_a_result(mocker):
     assert len(result.boundaries) >= 2
     boundary_ids = [b.boundary_id for b in result.boundaries]
     assert len(boundary_ids) == len(set(boundary_ids))
+
+
+def test_second_cut_detected_while_first_is_still_pending_merges_into_it(mocker):
+    """Post-implementation amendment (AdaptiveDetector): a cut is reported
+    `window_width` frames after it actually occurs (buffered), so two
+    genuinely close-together cuts can both be *reported* within this
+    module's own POST_CUT_WINDOW of each other -- verified empirically
+    (steady 0 x10, jump to 255, one steady frame, jump back to 0, steady 0):
+    AdaptiveDetector reports cuts at frames 10 and 12, only 2 frames apart,
+    which must merge into a single boundary (the `if pending: continue`
+    path) rather than producing two."""
+    fps = 25.0
+    values = [0] * 10 + [255, 255, 0] + [0] * 10
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / fps, frame=_solid_frame(v))
+        for i, v in enumerate(values)
+    ]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frames),
+    )
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with detect_scenes(request) as detector:
+        result = detector.run()
+
+    assert result.total_boundaries == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(10 / fps)
 
 
 def test_frames_sourced_exclusively_via_extract_frames_not_cv2_directly(mocker):

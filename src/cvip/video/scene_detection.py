@@ -10,7 +10,7 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
-from scenedetect.detectors import ContentDetector
+from scenedetect.detectors import AdaptiveDetector
 
 from cvip.common.diagnostics import DiagnosticsTracker, ExecutionDiagnostics, emit_diagnostics
 from cvip.video.frame_extraction import extract_frames
@@ -44,12 +44,14 @@ RAMP_MIN_ELEVATED_FRAMES = 2
 
 # How many recent (frame_index -> timestamp) pairs to retain. SceneDetector's
 # general process_frame() contract permits a detector to report a cut frame
-# other than the one just passed in (e.g. a buffering detector reporting a
-# fade's start once its end is seen) -- ContentDetector itself never does
-# this in practice (verified against its implementation: it always returns
-# either [] or exactly [frame_num]), but this buffer is kept as a defensive
-# safety net against that general contract rather than relying on knowledge
-# of one specific detector's internals.
+# other than the one just passed in -- AdaptiveDetector genuinely does this
+# (verified against its implementation): it holds a small rolling buffer
+# (2 * window_width + 1 frames, 5 by default) and reports a cut for a frame
+# already `window_width` calls in the past, once enough trailing context
+# exists to compute that frame's local-neighborhood average. 32 is a
+# generous multiple of AdaptiveDetector's own default 5-frame buffer, kept
+# as a defensive margin rather than hard-coding knowledge of one specific
+# detector's exact buffer size here too.
 RECENT_TIMESTAMP_BUFFER_SIZE = 32
 
 _ExtractionFailureToSceneDetectionFailure = {
@@ -117,8 +119,29 @@ class SceneDetector:
             )
 
         source = load_result.source
-        content_detector = ContentDetector(
-            threshold=self._request.scene_threshold,
+        content_detector = AdaptiveDetector(
+            # Post-implementation amendment (specs/003-scene-detection/
+            # research.md "Detector selection" note): PySceneDetect's
+            # ContentDetector -- a single fixed cut-score threshold applied
+            # video-wide -- could not generalize across a single real match
+            # recording, let alone across different broadcasts/tournaments.
+            # Real-video validation found the video's own "how different do
+            # two frames look" scale varies enormously within one match
+            # (max observed score ~5.7 during calm pre-match footage vs.
+            # ~95-97 during active play) -- no single fixed number is
+            # simultaneously right for both. AdaptiveDetector compares each
+            # frame against a small rolling window of its own immediate
+            # neighbors instead of one global constant, so it self-adjusts
+            # to whichever regime the footage is currently in.
+            # `adaptive_threshold` (the ratio a frame's score must exceed
+            # relative to its neighborhood -- "how many times more
+            # different than usual") is left at PySceneDetect's own
+            # published default (3.0), since it is inherently scale-
+            # invariant and not something real-video testing found reason
+            # to override. `min_content_val` (see its own field
+            # documentation on `SceneDetectionRequest.scene_threshold`) is
+            # the one parameter this platform calibrates.
+            min_content_val=self._request.scene_threshold,
             # PySceneDetect's own default (min_scene_len=15) silently drops
             # any cut within 15 frames of the previous one -- not part of
             # this feature's contract, and would violate FR-006 for two

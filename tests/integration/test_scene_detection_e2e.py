@@ -417,13 +417,19 @@ def test_ordinary_cut_and_replay_transition_classified_distinctly(mocker):
         frames.append(
             FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / fps, frame=_solid_frame(255))
         )
-    # Replay-style transition: several large consecutive full-range flips
-    # (each step individually well above the cut threshold -- ContentDetector's
-    # HSV-based score divides by the sum of its component weights, so a step
-    # needs a large enough magnitude to still cross the threshold after that
-    # division), unlike an ordinary cut's single isolated jump followed by a
-    # steady frame.
-    steps = [0, 255, 0, 255, 0]
+    # Replay-style transition: a sharp cut-in followed by a *gradual* ramp
+    # back to baseline (simulating a dissolve/wipe), rather than repeated
+    # full-range 0/255 inversions. Post-implementation amendment: with
+    # AdaptiveDetector (real-video finding, specs/003-scene-detection/
+    # research.md), a burst of consecutive large jumps suppresses itself --
+    # each jump's own local neighborhood (window_width=2 frames either
+    # side) is *also* full of other large jumps, so its score-vs-neighborhood
+    # ratio collapses well below adaptive_threshold even though each jump's
+    # raw magnitude is large. This is intentional, correct behavior (the
+    # same mechanism that avoids false positives from camera motion), not a
+    # regression -- a real dissolve ramps smoothly rather than strobing
+    # between extremes, so this fixture now reflects that instead.
+    steps = [0, 60, 120, 180, 120, 60, 0]
     for j, value in enumerate(steps):
         i = 60 + j
         frames.append(

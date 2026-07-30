@@ -20,21 +20,45 @@ ocr:
   min_confidence: 0.70
 
 replay:
-  confidence_threshold: 0.65
+  # Calibrated against real footage (First8Overs.mp4): with no logo template
+  # configured (the common case -- see logo_template_path below) and this
+  # broadcast's hard, non-ramping cuts into replay (Scene Detection's
+  # REPLAY_TRANSITION heuristic didn't fire), the original weights
+  # (logo=0.35, transition=0.15) left a max achievable combined confidence
+  # of 0.50-0.65 depending on scenario -- at or below the original
+  # threshold (0.65), making detection mathematically unreachable rather
+  # than merely insensitive. Rebalanced so logo/transition remain
+  # meaningful when actually available, without being able to single-
+  # handedly gate detection: scoreboard+motion+camera_angle alone (the
+  # three signals that work without a template or a ramping cut) now have
+  # a 0.65 ceiling, comfortably above the lowered threshold. A reasoned
+  # recalibration from two hand-verified samples, not exhaustively tuned --
+  # revisit if other footage shows it's still wrong.
+  confidence_threshold: 0.50
   min_segment_seconds: 3
   # Optional reference image for the replay-logo/bumper-graphic signal (specs/004-replay-detection/).
   # When unset, that one signal always scores 0.0 rather than blocking detection.
   logo_template_path: null
   signals:
-    replay_logo_weight: 0.35
-    scoreboard_absence_weight: 0.20
-    motion_profile_weight: 0.20
-    transition_weight: 0.15
-    camera_angle_weight: 0.10
+    replay_logo_weight: 0.15
+    scoreboard_absence_weight: 0.25
+    motion_profile_weight: 0.25
+    transition_weight: 0.20
+    camera_angle_weight: 0.15
 
 events:
-  pre_roll_seconds: 8
-  post_roll_seconds: 12
+  # Calibrated against real match footage (First8Overs.mp4, WICKET and SIX
+  # events cross-checked by hand): the on-screen scoreboard graphic does not
+  # update until the broadcast cuts back from its post-event replay, so the
+  # OCR-detected event timestamp lags the actual live delivery by ~15s.
+  # Bowler run-up consistently begins ~30-35s before the detected timestamp;
+  # the replay consistently finishes within ~0-10s after it. pre_roll is set
+  # generously above the observed run-up lag to make sure this holds for
+  # longer run-ups too; post_roll keeps a small margin above the observed
+  # replay-completion point. A reasoned calibration from two samples, not an
+  # exhaustively tuned value -- revisit if other footage shows it's wrong.
+  pre_roll_seconds: 35
+  post_roll_seconds: 15
   merge_gap_seconds: 3
   # TEAM_MILESTONE fires each time the batting team's runs total crosses a
   # multiple of this interval (specs/007-event-detection/spec.md FR-008).

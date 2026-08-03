@@ -14,11 +14,13 @@ from cvip.video.scoreboard_parsers import (
     GenericBroadcastParser,
     SeparateTokenBroadcastParser,
     _COMPOUND_SCORE_RE,
+    _FUSED_OVER_BALL_PAREN_RE,
     _PAREN_TOTAL_OVERS_RE,
     _SEPARATE_OVER_BALL_RE,
     _SEPARATE_SCORE_RE,
     _find_stats_marker_positions,
     _find_split_over_ball_index,
+    _locate_over_ball,
     _STATS_MARKER_RE,
     _walk_bowler_name_before,
     _walk_name_fragment,
@@ -341,3 +343,68 @@ def test_separate_token_broadcast_recovers_full_reading_despite_ocr_noise():
     parsed, _ = parser.parse(tokens)
     assert (parsed["runs"], parsed["wickets"]) == (131, 6)
     assert (parsed["over_number"], parsed["ball_in_over"]) == (15, 5)
+
+
+# =============================================================================
+# Post-implementation amendment, round 2 (ground_truth_v2/classify_generic_fallback_v4.py):
+# a systematic real-frame classification of the residual generic_broadcast
+# failure population -- after round 1's regex-tolerance amendment above --
+# found 22% of them are cases where Tesseract drops the *space* between
+# the over.ball token and its own "(total_overs)" token entirely, fusing
+# them into a single token this format's two-*separate*-tokens signature
+# was structurally unable to recognize regardless of per-side regex
+# tolerance. Each example token below is taken verbatim from that real
+# capture (ground_truth_v2/classify_generic_fallback_v4_output.log), not
+# synthesized.
+# =============================================================================
+
+
+def test_fused_over_ball_paren_re_matches_real_fused_token():
+    match = _FUSED_OVER_BALL_PAREN_RE.match("0.0,(20)")  # real: t=57.0
+    assert match is not None
+    assert match.groups() == ("0", "0", "20")
+
+
+def test_fused_over_ball_paren_re_rejects_when_opening_paren_is_missing():
+    """Real observed cases with no "(" substring left at all (the opening
+    paren itself dropped or merged away, not just noisy) remain a real,
+    un-recovered miss -- same documented boundary as
+    `_PAREN_TOTAL_OVERS_RE`'s own missing-paren test above."""
+    assert _FUSED_OVER_BALL_PAREN_RE.match("0.05120)") is None  # real: t=1.0
+    assert _FUSED_OVER_BALL_PAREN_RE.match("0.57120)") is None  # real: t=245.0
+
+
+def test_locate_over_ball_prefers_split_shape_when_both_present():
+    """The two-separate-tokens shape is the common, cleaner case -- tried
+    first, so a token list that happens to satisfy both shapes still
+    resolves via the split path."""
+    index, over, ball, conf = _locate_over_ball(SEPARATE_TOKEN_TOKENS)
+    assert (index, over, ball) == (2, 1, 0)
+    assert conf == pytest.approx(94.0)
+
+
+def test_locate_over_ball_falls_back_to_fused_shape():
+    tokens = [("12-0", 61.0), ("0.0,(20)", 19.0), ("Rajesh", 89.0)]
+    index, over, ball, conf = _locate_over_ball(tokens)
+    assert (index, over, ball) == (1, 0, 0)
+    assert conf == pytest.approx(19.0)
+
+
+def test_locate_over_ball_returns_none_when_neither_shape_present():
+    assert _locate_over_ball(HAPPY_PATH_TOKENS) is None
+    assert _locate_over_ball(CLUB_EVIDENCE_TOKENS) is None
+
+
+def test_separate_token_broadcast_recovers_reading_from_fused_over_ball_token():
+    """The end-to-end case this round-2 amendment exists for: real tokens
+    captured from a frame that was previously discarded entirely (fell
+    through to generic_broadcast with no runs/wickets at all) because the
+    over.ball/total-overs pairing was fused into one token, not because
+    the score itself was unreadable."""
+    tokens = [("N)", 1.0), ("|", 42.0), ("0-0", 93.0), ("0.0,(20)", 19.0), ("Rajesh", 89.0)]
+    parser = SeparateTokenBroadcastParser()
+
+    assert parser.matches(tokens) is True
+    parsed, _ = parser.parse(tokens)
+    assert (parsed["runs"], parsed["wickets"]) == (0, 0)
+    assert (parsed["over_number"], parsed["ball_in_over"]) == (0, 0)

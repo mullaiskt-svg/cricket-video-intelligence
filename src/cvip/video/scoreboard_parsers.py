@@ -362,6 +362,23 @@ class ClubBroadcastParser:
 _SEPARATE_SCORE_RE = re.compile(r"^\W?(\d+)-(\d+)$")
 _SEPARATE_OVER_BALL_RE = re.compile(r"^(\d+)\.(\d+)")
 _PAREN_TOTAL_OVERS_RE = re.compile(r"^\W{0,2}\((\d+)\)")
+
+# Post-implementation amendment (round 2, ground_truth_v2/classify_generic_fallback_v4.py):
+# a systematic real-frame classification found 22% of this format's
+# remaining OCR failures are cases where Tesseract drops the *space*
+# between the over.ball token and its own "(total_overs)" token entirely,
+# fusing them into one token (e.g. "0.0" + "(20)" -> "0.0,(20)") --
+# `_find_split_over_ball_index`'s two-*separate*-tokens requirement can
+# never recover this, since the second token it looks for was merged away
+# rather than merely noisy. Tolerates up to 3 stray characters between the
+# digits and the opening paren -- the same class of noise
+# `_PAREN_TOTAL_OVERS_RE` already tolerates when the paren *is* its own
+# token -- but still requires the literal "(" to be present: a token where
+# the opening paren itself was dropped or merged into the *next* word
+# entirely (e.g. "0.05120)", a real observed case with no "(" substring at
+# all) has nothing left to recover here either, the same documented,
+# un-recovered limit `_PAREN_TOTAL_OVERS_RE`'s own tests already establish.
+_FUSED_OVER_BALL_PAREN_RE = re.compile(r"^(\d+)\.(\d+)\D{0,3}\((\d+)\)")
 _CRR_LABEL_RE = re.compile(r"^CRR:?$", re.IGNORECASE)
 _DECIMAL_RE = re.compile(r"^\d+\.\d+$")
 _SEPARATE_TOKEN_NAME_RE = re.compile(r"^[A-Za-z]+$")
@@ -387,6 +404,32 @@ def _find_split_over_ball_index(tokens: List[Tuple[str, float]]) -> Optional[int
     for i in range(len(tokens) - 1):
         if _SEPARATE_OVER_BALL_RE.match(tokens[i][0]) and _PAREN_TOTAL_OVERS_RE.match(tokens[i + 1][0]):
             return i
+    return None
+
+
+def _locate_over_ball(
+    tokens: List[Tuple[str, float]],
+) -> Optional[Tuple[int, int, int, float]]:
+    """This format's over.ball signature, in either shape Tesseract has
+    been observed to actually produce it in: the two-*separate*-tokens
+    shape (`_find_split_over_ball_index`), tried first since it is the
+    more common, cleaner case; falling back to the single-*fused*-token
+    shape (`_FUSED_OVER_BALL_PAREN_RE`) a space-drop can produce. Returns
+    `(token_index, over_number, ball_in_over, confidence)`, or `None` if
+    neither shape is found -- `token_index` is always a single index into
+    `tokens` either way, so every caller that scans forward/backward from
+    it (the score lookup, the bowler-figures lookup below) works
+    identically regardless of which shape actually matched."""
+    split_index = _find_split_over_ball_index(tokens)
+    if split_index is not None:
+        match = _SEPARATE_OVER_BALL_RE.match(tokens[split_index][0])
+        return split_index, int(match.group(1)), int(match.group(2)), tokens[split_index][1]
+
+    for i, (text, confidence) in enumerate(tokens):
+        fused_match = _FUSED_OVER_BALL_PAREN_RE.match(text)
+        if fused_match:
+            return i, int(fused_match.group(1)), int(fused_match.group(2)), confidence
+
     return None
 
 
@@ -446,14 +489,14 @@ class SeparateTokenBroadcastParser:
     preferred_preprocessing_strategy = "adaptive_mean"
 
     def matches(self, tokens: List[Tuple[str, float]]) -> bool:
-        return _find_split_over_ball_index(tokens) is not None
+        return _locate_over_ball(tokens) is not None
 
     def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
         parsed: Dict[str, Any] = {}
         confidences: Dict[str, float] = {}
 
-        over_ball_index = _find_split_over_ball_index(tokens)
-        if over_ball_index is None:
+        located = _locate_over_ball(tokens)
+        if located is None:
             # matches() is always checked first by select_parser(), but
             # parse() makes no assumption about being called only after a
             # successful matches() -- fail closed (no fields) rather than
@@ -461,10 +504,9 @@ class SeparateTokenBroadcastParser:
             # fabricated" contract.
             return parsed, confidences
 
-        over_match = _SEPARATE_OVER_BALL_RE.match(tokens[over_ball_index][0])
-        over_conf = tokens[over_ball_index][1]
-        parsed["over_number"] = int(over_match.group(1))
-        parsed["ball_in_over"] = int(over_match.group(2))
+        over_ball_index, over_number, ball_in_over, over_conf = located
+        parsed["over_number"] = over_number
+        parsed["ball_in_over"] = ball_in_over
         confidences["over_number"] = over_conf / _TESSERACT_CONFIDENCE_SCALE
         confidences["ball_in_over"] = over_conf / _TESSERACT_CONFIDENCE_SCALE
 

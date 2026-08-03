@@ -187,9 +187,17 @@ def test_no_event_when_runs_and_wickets_unchanged():
 
 
 # --- FR-009, Acceptance Scenario US1-5, SC-006: null-field skip -----------
+#
+# Post-implementation amendment (state_transition.py): null-core samples are
+# now dropped before a ScoreState is ever built, so a bracketing null-core
+# reading can no longer reach the Comparison Engine at all -- there simply
+# isn't a second state to compare against here, which is a stronger
+# guarantee than the original "skip the comparison" behavior this test
+# named. See test_state_transition.py's own dedicated null-handling tests
+# for coverage of that dropping behavior in isolation.
 
 
-def test_comparison_skipped_when_bracketing_reading_has_null_core_field():
+def test_leading_null_readings_leave_too_few_states_to_produce_any_comparison():
     samples = [_null_cleaned(0.0), _null_cleaned(1.0), _cleaned(2.0, runs=5, ball_in_over=1)]
     result = _run(samples)
 
@@ -230,7 +238,14 @@ def test_team_milestone_emitted_with_correct_value_on_single_threshold_cross():
 
 
 def test_two_team_milestones_emitted_when_single_comparison_crosses_two_thresholds():
-    samples = [_cleaned(0.0, runs=45, ball_in_over=1), _cleaned(1.0, runs=106, ball_in_over=2)]
+    # Post-implementation amendment (State Transition Detection): a 61-run
+    # jump on a single-ball advance is not plausible (no delivery scores
+    # that many runs) and is now correctly discarded by
+    # state_transition.py's own anomaly guardrail. Spread the same 61-run
+    # gap over a multi-over span instead -- still one comparison crossing
+    # two thresholds, but a plausible one (a multi-ball OCR gap followed by
+    # a catch-up jump).
+    samples = [_cleaned(0.0, runs=45, over_number=1, ball_in_over=1), _cleaned(1.0, runs=106, over_number=10, ball_in_over=2)]
     result = _run(samples, team_milestone_interval=50)
 
     milestone_values = sorted(e.milestone_value for e in result.events if e.event_type == "TEAM_MILESTONE")
@@ -411,8 +426,12 @@ def test_diagnostics_contains_every_required_field_on_success(mocker):
     assert emit_spy.call_count == 1
     output_summary = emit_spy.call_args[0][0].output_summary
     for field_name in (
+        "raw_sample_count=",
+        "distinct_state_count=",
+        "state_reduction_pct=",
         "comparisons_processed=",
-        "comparisons_skipped=",
+        "anomalous_transitions_discarded=",
+        "anomalous_transition_examples=",
         "four_count=",
         "six_count=",
         "wicket_count=",

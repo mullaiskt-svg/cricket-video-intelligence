@@ -72,3 +72,14 @@ htmlcov/
 specs/tasks.md
 specs/coverage.md
 specs/quality.md
+
+# One-off investigation/experiment scripts and their output (not shipped code)
+/ground_truth_v2/
+/ground_truth_scores.py
+/ocr_root_cause_report*.html
+/preprocessing_experiment.log
+/run_preprocessing_experiment.py
+/run_third_match_*.py
+/run_variant_accuracy_analysis.py
+/third_match_*.csv
+/third_match_*.log

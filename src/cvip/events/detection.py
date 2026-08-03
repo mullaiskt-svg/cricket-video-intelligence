@@ -26,9 +26,16 @@ from cvip.events.models import (
     EventDetectionResult,
     EventEvidence,
 )
-from cvip.video.ocr_timeline_smoother_models import CleanedScoreboardSample
+from cvip.events.state_transition import detect_state_transitions, is_anomalous_transition
+from cvip.events.state_transition_models import ScoreState
 from cvip.video.replay_detection_models import ReplaySegment
 from cvip.video.scoreboard_ocr_models import ScoreboardSample
+
+#: How many discarded-transition examples to retain for diagnostics -- an
+#: unbounded log would defeat the point of surfacing "future debugging" if
+#: a run happened to discard a very large number (e.g. a whole corrupted
+#: stretch of a broadcast).
+MAX_ANOMALOUS_TRANSITION_EXAMPLES = 10
 
 MODULE_NAME = "events.detection"
 
@@ -39,14 +46,6 @@ MODULE_NAME = "events.detection"
 # (FR-028), matching Scene Detection's own CONFIGURATION_VERSION precedent.
 CONFIGURATION_VERSION = 1
 
-# The four fields a cleaned reading must have all non-null for a comparison
-# to carry enough information to detect an event from (FR-009). Every
-# mid-timeline/trailing gap in the cleaned timeline already holds a concrete
-# value (the OCR Timeline Smoother's own guarantee) -- only a leading gap
-# can ever leave these null, so no separate "seed the baseline" step is
-# needed: once past the leading gap, `samples[index - 1]` is always usable
-# as the comparison's own tracked baseline.
-_CORE_FIELDS = ("runs", "wickets", "over_number", "ball_in_over")
 
 
 def detect_events(request: EventDetectionRequest) -> "EventDetectionRunner":
@@ -79,8 +78,12 @@ class EventDetectionRunner:
 
         self._innings = 1
         self._comparisons_processed = 0
-        self._comparisons_skipped = 0
         self._innings_transitions_detected = 0
+        # State Transition Detection (state_transition.py) counters.
+        self._raw_sample_count = 0
+        self._distinct_state_count = 0
+        self._anomalous_transitions_count = 0
+        self._anomalous_transition_examples: List[Tuple[ScoreState, ScoreState, str]] = []
         self._event_type_counts: Dict[str, int] = {
             "FOUR": 0,
             "SIX": 0,
@@ -125,20 +128,45 @@ class EventDetectionRunner:
         raw_by_timestamp = {s.timestamp_seconds: s for s in request.raw_ocr_result.samples}
         replay_index = _build_replay_index(request.replay_result.segments)
 
+        self._raw_sample_count = len(samples)
+        # -- State Transition Detection (state_transition.py) --------------
+        # Collapse the raw per-second cleaned timeline into distinct score
+        # states before comparing anything -- see that module's docstring
+        # for why comparing consecutive array positions directly yields
+        # near-total recall failure independent of OCR accuracy.
+        distinct_states = detect_state_transitions(samples, raw_by_timestamp)
+        self._distinct_state_count = len(distinct_states)
+
         events: List[DetectedEvent] = []
         evidence_list: List[EventEvidence] = []
 
-        for index in range(1, len(samples)):
+        # Walk the distinct states comparing each against the most recent
+        # *accepted* (non-anomalous) one, not simply its immediate
+        # predecessor -- an anomalous transition (state_transition.py's own
+        # guardrail) is discarded and never becomes the baseline for the
+        # next comparison, so one corrupted state can't poison every
+        # comparison after it (the same class of "baseline poisoning" bug
+        # already fixed, independently, in Scoreboard OCR's own validation).
+        last_good_index = 0
+        for index in range(1, len(distinct_states)):
             if self._cancelled:
                 break
-            self._comparisons_processed += 1
+            previous = distinct_states[last_good_index]
+            current = distinct_states[index]
 
-            pairs = self._process_comparison(
-                samples[index - 1], samples[index], raw_by_timestamp, replay_index
-            )
+            anomaly_reason = is_anomalous_transition(previous, current)
+            if anomaly_reason is not None:
+                self._anomalous_transitions_count += 1
+                if len(self._anomalous_transition_examples) < MAX_ANOMALOUS_TRANSITION_EXAMPLES:
+                    self._anomalous_transition_examples.append((previous, current, anomaly_reason))
+                continue  # last_good_index deliberately not advanced
+
+            self._comparisons_processed += 1
+            pairs = self._process_comparison(previous, current, raw_by_timestamp, replay_index)
             for event, evidence in pairs:
                 events.append(event)
                 evidence_list.append(evidence)
+            last_good_index = index
 
         self._events = events
         self._evidence_list = evidence_list
@@ -155,8 +183,8 @@ class EventDetectionRunner:
 
     def _process_comparison(
         self,
-        previous: CleanedScoreboardSample,
-        current: CleanedScoreboardSample,
+        previous: ScoreState,
+        current: ScoreState,
         raw_by_timestamp: Dict[float, ScoreboardSample],
         replay_index: Tuple[List[ReplaySegment], List[float]],
     ) -> List[Tuple[DetectedEvent, EventEvidence]]:
@@ -166,10 +194,10 @@ class EventDetectionRunner:
         FR-016). Returns zero or more (DetectedEvent, EventEvidence) pairs.
         """
         # -- Timeline Comparison -------------------------------------------
-        if _has_null_core(previous) or _has_null_core(current):
-            self._comparisons_skipped += 1
-            return []
-
+        # No null-core check here: state_transition.py's detect_state_transitions()
+        # already drops every null-core sample before a ScoreState is ever
+        # constructed, and ScoreState's core fields are non-Optional -- so
+        # `previous`/`current` are guaranteed fully populated by this point.
         if current.runs < previous.runs and current.wickets < previous.wickets:
             # Innings-transition heuristic (FR-010): no event derived, only
             # the internal baseline/innings counter advance. Reuses Module
@@ -319,9 +347,28 @@ class EventDetectionRunner:
         # ZeroDivisionError -- the guard is the whole point of this line.
         average_confidence = (self._total_confidence / total_events) if total_events else 0.0
 
+        # State Transition Detection (state_transition.py): how much the
+        # raw per-second timeline was collapsed before any comparison ran,
+        # and how many of the resulting state-to-state transitions were
+        # discarded as implausible rather than processed.
+        reduction_pct = (
+            100.0 * (1 - self._distinct_state_count / self._raw_sample_count)
+            if self._raw_sample_count
+            else 0.0
+        )
+        anomalous_examples_summary = "; ".join(
+            f"[{p.runs}-{p.wickets}/{p.over_number}.{p.ball_in_over}@{p.timestamp_seconds:.0f}s -> "
+            f"{c.runs}-{c.wickets}/{c.over_number}.{c.ball_in_over}@{c.timestamp_seconds:.0f}s: {reason}]"
+            for p, c, reason in self._anomalous_transition_examples
+        )
+
         output_summary = (
+            f"raw_sample_count={self._raw_sample_count} "
+            f"distinct_state_count={self._distinct_state_count} "
+            f"state_reduction_pct={reduction_pct:.1f} "
             f"comparisons_processed={self._comparisons_processed} "
-            f"comparisons_skipped={self._comparisons_skipped} "
+            f"anomalous_transitions_discarded={self._anomalous_transitions_count} "
+            f"anomalous_transition_examples=({anomalous_examples_summary}) "
             f"four_count={self._event_type_counts['FOUR']} "
             f"six_count={self._event_type_counts['SIX']} "
             f"wicket_count={self._event_type_counts['WICKET']} "
@@ -343,11 +390,7 @@ class EventDetectionRunner:
 # -- module-level helpers (Event Rule Engine primitives, research.md) -------
 
 
-def _has_null_core(sample: CleanedScoreboardSample) -> bool:
-    return any(getattr(sample, field_name) is None for field_name in _CORE_FIELDS)
-
-
-def _is_single_ball_advance(previous: CleanedScoreboardSample, current: CleanedScoreboardSample) -> bool:
+def _is_single_ball_advance(previous: ScoreState, current: ScoreState) -> bool:
     """FR-006a: either `ball_in_over` +1 within the same over, or a rollover
     from `ball_in_over` 5 to 0 with `over_number` +1."""
     if current.over_number == previous.over_number and current.ball_in_over == previous.ball_in_over + 1:

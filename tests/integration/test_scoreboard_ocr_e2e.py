@@ -12,7 +12,8 @@ from cvip.video.frame_extraction_errors import ExtractionError, ExtractionFailur
 from cvip.video.frame_extraction_models import FrameContext
 from cvip.video.loader import load_video
 from cvip.video.models import ContainerFormat, LoadResult, MatchVideoSource
-from cvip.video.scoreboard_ocr import ClubBroadcastParser, extract_scoreboard
+from cvip.video.scoreboard_ocr import extract_scoreboard
+from cvip.video.scoreboard_parsers import ClubBroadcastParser
 from cvip.video.scoreboard_ocr_errors import ScoreboardOcrError, ScoreboardOcrFailureReason
 from cvip.video.scoreboard_ocr_models import ScoreboardOcrRequest, ScoreboardOcrResult, ScoreboardSample
 

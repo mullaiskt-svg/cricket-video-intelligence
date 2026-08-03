@@ -14,15 +14,8 @@ from cvip.video.frame_extraction_models import FrameContext
 from cvip.video.loader import load_video
 from cvip.video.models import ContainerFormat, LoadResult, MatchVideoSource
 from cvip.video.scoreboard_ocr import (
-    _COMPOUND_SCORE_RE,
-    _STATS_MARKER_RE,
     _LastAcceptedReading,
-    ClubBroadcastParser,
-    GenericBroadcastParser,
     ScoreboardOcrExtractor,
-    _find_stats_marker_positions,
-    _select_parser,
-    _walk_name_fragment,
     extract_scoreboard,
 )
 from cvip.video.scoreboard_ocr_errors import ScoreboardOcrError, ValidationFailureReason
@@ -1043,19 +1036,10 @@ CLUB_EVIDENCE_TOKENS = [
 ]
 
 
-# --- T006 (US1): _COMPOUND_SCORE_RE matching, including observed noise -----
-
-
-def test_compound_score_re_matches_via_search_tolerating_leading_noise():
-    assert _COMPOUND_SCORE_RE.search("_0-0/0.0(20)") is not None
-    assert _COMPOUND_SCORE_RE.search("0-0/0.0(20)") is not None
-
-
-def test_compound_score_re_rejects_score_without_trailing_total_overs():
-    assert _COMPOUND_SCORE_RE.search("0-0/0.0") is None
-
-
 # --- T007 (US1): compound score populates runs/wickets/over/ball -----------
+# (_COMPOUND_SCORE_RE's own matching behavior is tested directly in
+# tests/unit/test_scoreboard_parsers.py -- these two tests specifically
+# cover _parse_fields()'s dispatch-and-stamp integration, which stays here.)
 
 
 def test_compound_score_token_populates_score_fields_and_raw_token():
@@ -1088,52 +1072,10 @@ def test_original_format_reading_parses_identically_post_amendment():
     assert parsed["bowler"] == "Kumar"
 
 
-# --- T009 (US1): _select_parser() selection and determinism ----------------
-
-
-def test_select_parser_picks_club_broadcast_when_compound_score_present():
-    selected = _select_parser(CLUB_EVIDENCE_TOKENS)
-    assert isinstance(selected, ClubBroadcastParser)
-
-
-def test_select_parser_picks_generic_broadcast_otherwise():
-    selected = _select_parser(HAPPY_PATH_TOKENS)
-    assert isinstance(selected, GenericBroadcastParser)
-
-
-def test_select_parser_is_deterministic_for_identical_tokens():
-    first = _select_parser(CLUB_EVIDENCE_TOKENS)
-    second = _select_parser(CLUB_EVIDENCE_TOKENS)
-    assert first is second  # _PARSERS entries are singletons, reused every call
-
-
-# --- T014 (US2): stats-marker detection, joined and split forms ------------
-
-
-def test_stats_marker_re_matches_joined_batter_and_bowler_shapes():
-    assert _STATS_MARKER_RE.match("0(0)") is not None
-    assert _STATS_MARKER_RE.match("0-0(0)") is not None
-    assert _STATS_MARKER_RE.match("MAHESH") is None
-
-
-def test_find_stats_marker_positions_detects_both_joined_and_split_forms():
-    # index 1 = split ("0" + "(0)"), index 5 = joined ("0(0)"), index 11 = joined ("0-0(0)")
-    positions = _find_stats_marker_positions(CLUB_EVIDENCE_TOKENS)
-    assert positions == [1, 5, 11]
-
-
-# --- T015 (US2): name-fragment walk joins multi-word names -----------------
-
-
-def test_walk_name_fragment_joins_consecutive_alphabetic_tokens():
-    name, confidence = _walk_name_fragment(CLUB_EVIDENCE_TOKENS, anchor_index=5)
-    assert name == "SAI KRISHNA"
-    assert confidence == pytest.approx(87.0)
-
-
-def test_walk_name_fragment_returns_none_with_no_preceding_name():
-    name_and_conf = _walk_name_fragment([("0(0)", 80.0)], anchor_index=0)
-    assert name_and_conf is None
+# (_select_parser()/select_parser() selection+determinism,
+# _find_stats_marker_positions(), and _walk_name_fragment() are tested
+# directly in tests/unit/test_scoreboard_parsers.py, alongside the parsers
+# that use them.)
 
 
 # --- T016 (US2): batter/non_striker populate, team-name excluded -----------
@@ -1321,7 +1263,10 @@ def test_diagnostics_output_summary_contains_parser_strategy_breakdown_for_mixed
     assert result.samples[1].batter == "MAHESH"  # club_broadcast reading
 
     output_summary = emit_spy.call_args[0][0].output_summary
-    assert "parser_strategy=(club_broadcast=1, generic_broadcast=1)" in output_summary
+    assert (
+        "parser_strategy=(club_broadcast=1, generic_broadcast=1, separate_token_broadcast=0)"
+        in output_summary
+    )
     assert "generic_broadcast_unparsed_count=" in output_summary
 
 
@@ -1340,21 +1285,155 @@ def test_club_broadcast_stats_marker_with_no_preceding_name_is_skipped():
     assert parsed.get("batter") is None
     assert parsed["parser_strategy"] == "club_broadcast"
 
+# (select_parser()'s defensive no-match invariant is tested directly in
+# tests/unit/test_scoreboard_parsers.py.)
 
-def test_select_parser_raises_if_no_parser_matches(mocker):
-    """Defensive invariant: `_select_parser()` only ever raises if
-    `_PARSERS` were misconfigured without a universal fallback -- not
-    reachable via the real `_PARSERS` tuple (`GenericBroadcastParser`
-    always matches), so this is exercised via a monkeypatched registry."""
-    import cvip.video.scoreboard_ocr as scoreboard_ocr_module
 
-    class _NeverMatches:
-        name = "never_matches"
+# =============================================================================
+# Post-implementation amendment: preprocessing-strategy warm-up and locking
+# (scoreboard_preprocessing.py). See that module's docstring for the full
+# "why a locked-in choice per run, not a per-frame fallback chain" rationale.
+# =============================================================================
 
-        def matches(self, tokens):
-            return False
+# A minimal token stream matching SeparateTokenBroadcastParser's own
+# matches() signature (a bare "{over}.{ball}" token immediately followed by
+# its own "({total_overs})" token) -- sufficient to trigger the warm-up
+# lock without needing this parser's full field-extraction detail.
+SEPARATE_TOKEN_MINIMAL_TOKENS = [("1.0", 90.0), ("(20)", 85.0)]
 
-    mocker.patch.object(scoreboard_ocr_module, "_PARSERS", (_NeverMatches(),))
 
-    with pytest.raises(AssertionError):
-        scoreboard_ocr_module._select_parser([("anything", 90.0)])
+def test_preprocessing_strategy_locks_on_first_specific_parser_match(mocker):
+    extractor = _make_extractor()
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(SEPARATE_TOKEN_MINIMAL_TOKENS),
+    )
+    roi = _solid_frame(0, size=(20, 100, 3))
+
+    assert extractor._locked_strategy_name is None
+    extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+
+    assert extractor._locked_strategy_name == "adaptive_mean"
+
+
+def test_preprocessing_strategy_locks_to_otsu_for_club_broadcast(mocker):
+    extractor = _make_extractor()
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(CLUB_EVIDENCE_TOKENS),
+    )
+    roi = _solid_frame(0, size=(20, 100, 3))
+
+    extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+
+    assert extractor._locked_strategy_name == "otsu_threshold"
+
+
+def test_preprocessing_strategy_stays_unlocked_while_only_generic_matches(mocker):
+    """A run whose warm-up frames only ever match the universal
+    GenericBroadcastParser fallback (never a specific format) must not
+    lock in prematurely -- it should keep trying, up to the ceiling."""
+    extractor = _make_extractor()
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(HAPPY_PATH_TOKENS),
+    )
+    roi = _solid_frame(0, size=(20, 100, 3))
+
+    from cvip.video.scoreboard_ocr import PREPROCESSING_WARMUP_SAMPLE_LIMIT
+
+    for _ in range(PREPROCESSING_WARMUP_SAMPLE_LIMIT - 1):
+        extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+        assert extractor._locked_strategy_name is None
+
+    extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+    assert extractor._locked_strategy_name == "otsu_threshold"
+
+
+def test_preprocessing_strategy_locks_to_otsu_after_warmup_ceiling_with_no_tokens(mocker):
+    """Frames that yield zero tokens at all (not even a Generic match)
+    count toward the warm-up ceiling too -- an unlucky opening stretch of
+    undetectable frames must not stall locking forever."""
+    extractor = _make_extractor()
+    mocker.patch("cvip.video.scoreboard_ocr.pytesseract.image_to_data", return_value=_tesseract_data([]))
+    roi = _solid_frame(0, size=(20, 100, 3))
+
+    from cvip.video.scoreboard_ocr import PREPROCESSING_WARMUP_SAMPLE_LIMIT
+
+    for _ in range(PREPROCESSING_WARMUP_SAMPLE_LIMIT):
+        extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+
+    assert extractor._locked_strategy_name == "otsu_threshold"
+
+
+def test_locked_preprocessing_strategy_used_for_subsequent_frames(mocker):
+    """Once locked, later frames' preprocessing must actually use the
+    locked strategy -- verified via the real cv2 pipeline output, not just
+    the state flag, since that's what Tesseract actually receives."""
+    extractor = _make_extractor()
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(SEPARATE_TOKEN_MINIMAL_TOKENS),
+    )
+    roi = _solid_frame(0, size=(20, 100, 3))
+    extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+    assert extractor._locked_strategy_name == "adaptive_mean"
+
+    spy = mocker.spy(extractor, "_preprocess_roi")
+    extractor._process_frame(roi, 6.0, _LastAcceptedReading())
+
+    spy.assert_called_once_with(roi, "adaptive_mean")
+
+
+def test_preprocessing_strategy_never_relocks_once_set(mocker):
+    """A run that locks onto one format must not re-evaluate on later
+    frames, even if a later frame's tokens would structurally match a
+    different parser (e.g. a garbled misread) -- the lock is per-run,
+    not per-frame."""
+    extractor = _make_extractor()
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(SEPARATE_TOKEN_MINIMAL_TOKENS),
+    )
+    roi = _solid_frame(0, size=(20, 100, 3))
+    extractor._process_frame(roi, 5.0, _LastAcceptedReading())
+    assert extractor._locked_strategy_name == "adaptive_mean"
+
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(CLUB_EVIDENCE_TOKENS),
+    )
+    extractor._process_frame(roi, 6.0, _LastAcceptedReading())
+
+    assert extractor._locked_strategy_name == "adaptive_mean"  # unchanged
+
+
+def test_diagnostics_report_locked_preprocessing_strategy(mocker):
+    load_result = _dummy_load_result(duration_seconds=1.0)
+    frames = [FrameContext(source_video_id="deadbeef", frame_index=0, timestamp_seconds=0.0, frame=_solid_frame(50))]
+    mocker.patch("cvip.video.scoreboard_ocr.extract_frames", return_value=_FakeFrameExtractor(frames))
+    mocker.patch(
+        "cvip.video.scoreboard_ocr.pytesseract.image_to_data",
+        return_value=_tesseract_data(SEPARATE_TOKEN_MINIMAL_TOKENS),
+    )
+    emit_spy = mocker.patch("cvip.video.scoreboard_ocr.emit_diagnostics")
+
+    request = ScoreboardOcrRequest(load_result=load_result, **DEFAULT_REQUEST_KWARGS)
+    with extract_scoreboard(request) as extractor:
+        extractor.run()
+
+    output_summary = emit_spy.call_args[0][0].output_summary
+    assert "preprocessing_strategy_locked=adaptive_mean" in output_summary
+
+
+def test_preprocess_roi_defaults_to_otsu_when_no_strategy_given():
+    """Backward-compatibility invariant: every pre-existing direct caller
+    of _preprocess_roi() (this test file's own earlier tests included)
+    passes no strategy_name at all -- must keep behaving exactly as
+    before this amendment."""
+    extractor = _make_extractor(preprocess_grayscale=True, preprocess_threshold=True, preprocess_upscale=1)
+    roi = _solid_frame(128, size=(20, 100, 3))
+
+    result = extractor._preprocess_roi(roi)
+
+    assert set(np.unique(result)).issubset({0, 255})  # Otsu binarizes; a solid-color ROI collapses to one value

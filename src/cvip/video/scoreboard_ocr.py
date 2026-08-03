@@ -3,16 +3,19 @@
 See specs/005-scoreboard-ocr/contracts/scoreboard_ocr_contract.md
 for the full contract this module implements, and
 specs/011-club-broadcast-overlay-support/ for the club-broadcast-overlay
-amendment (compound score strings, best-effort name extraction) layered on
-top of it via the `_ScoreParser` Strategy interface below.
+amendment (compound score strings, best-effort name extraction). The
+structured-parsing stage itself is a pluggable, per-broadcast-format
+architecture living in scoreboard_parsers.py (see that module's docstring
+for the extension guide) -- this module owns everything *around* parsing:
+ROI extraction, preprocessing, Tesseract invocation, cricket-rule
+validation, and diagnostics, all parser-agnostic by construction.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
-import re
-from typing import Any, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -35,6 +38,8 @@ from cvip.video.scoreboard_ocr_models import (
     ScoreboardOcrResult,
     ScoreboardSample,
 )
+from cvip.video.scoreboard_parsers import PARSER_PREFERRED_STRATEGY, PARSERS, GenericBroadcastParser, select_parser
+from cvip.video.scoreboard_preprocessing import DEFAULT_STRATEGY_NAME, PREPROCESSING_STRATEGIES
 
 MODULE_NAME = "video.scoreboard_ocr"
 
@@ -54,6 +59,16 @@ ROI_UNCHANGED_TOLERANCE = 2.0
 # Valid ranges for the count-like fields (spec.md Assumptions).
 WICKETS_MAX = 10
 BALL_IN_OVER_MAX = 6
+
+# How many samples to preprocess with scoreboard_preprocessing.py's
+# DEFAULT_STRATEGY_NAME (Otsu) before giving up on identifying a specific
+# broadcast format and locking Otsu in permanently for this run. In
+# practice this rarely matters: a specific parser's `matches()` signature
+# has been observed to fire on the very first successfully-tokenized
+# frame, so this ceiling only bounds the worst case (e.g. a run whose
+# opening samples are all undetectable). See scoreboard_preprocessing.py's
+# module docstring for the full warm-up-then-lock rationale.
+PREPROCESSING_WARMUP_SAMPLE_LIMIT = 5
 
 # Post-implementation fix (specs/011-club-broadcast-overlay-support/'s
 # full-match real-video validation, PLATINUM CUP FINAL): over_number had no
@@ -80,32 +95,6 @@ _TESSERACT_CONFIDENCE_SCALE = 100.0
 # dense text block, not a full page (research.md-style reasoned default).
 _TESSERACT_CONFIG = "--psm 6"
 
-# -- specs/005-scoreboard-ocr/: the original, generic-broadcast token shapes -
-_RUNS_WICKETS_RE = re.compile(r"^(\d+)/(\d+)$")
-_OVER_BALL_RE = re.compile(r"^(\d+)\.(\d+)$")
-_BOWLER_LABEL_RE = re.compile(r"^(?:B|BOWLER)[:.]?$", re.IGNORECASE)
-_NAME_RE = re.compile(r"^[A-Za-z]+\*?$")
-
-# -- specs/011-club-broadcast-overlay-support/: the club-broadcast overlay --
-# amendment's token shapes (research.md Decisions 2-3). `_COMPOUND_SCORE_RE`
-# uses `search()`, not `match()`/`fullmatch()`, to tolerate the observed
-# leading-noise-character case (a stray "_" immediately before the score,
-# a Tesseract misread of the overlay's decorative edge pixel).
-_COMPOUND_SCORE_RE = re.compile(r"(\d+)-(\d+)/(\d+)\.(\d+)\(\d+\)")
-
-# A player-stats token immediately following a name in this overlay: batter
-# "0(0)" (runs-and-balls), bowler "0-0(0)" (wickets-runs-and-overs) -- the
-# joined form. `_BARE_INT_RE`/`_PAREN_INT_RE` together detect the split form
-# Tesseract was also observed to produce ("0" then "(0)" as two tokens).
-_STATS_MARKER_RE = re.compile(r"^\d+-?\d*\(\d+\)$")
-_BARE_INT_RE = re.compile(r"^\d+$")
-_PAREN_INT_RE = re.compile(r"^\(\d+\)$")
-
-# A club-broadcast name fragment: plain alphabetic, no asterisk convention
-# (unlike `_NAME_RE`, which tolerates a trailing "*" for the original
-# format's striker marker -- this format has no text-visible equivalent).
-_CLUB_NAME_FRAGMENT_RE = re.compile(r"^[A-Za-z]+$")
-
 _ExtractionFailureToScoreboardOcrFailure = {
     ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN: ScoreboardOcrFailureReason.SOURCE_UNAVAILABLE_MID_RUN,
     ExtractionFailureReason.DECODE_FAILURE_MID_RUN: ScoreboardOcrFailureReason.DECODE_FAILURE_MID_RUN,
@@ -120,227 +109,6 @@ def extract_scoreboard(request: ScoreboardOcrRequest) -> "ScoreboardOcrExtractor
             result = extractor.run()
     """
     return ScoreboardOcrExtractor(request)
-
-
-# -- specs/011-club-broadcast-overlay-support/ research.md Decision 5: -------
-# -- Parser Strategy interface -----------------------------------------------
-
-
-class _ScoreParser(Protocol):
-    """Strategy interface for the structured-parsing stage. Implementations
-    are pure functions of `tokens` alone -- no shared mutable state, no
-    dependency on prior readings -- which is what makes `_select_parser()`
-    deterministic: the same token list always selects, and is parsed by,
-    the same strategy (FR-003, FR-020)."""
-
-    name: str
-
-    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
-        ...
-
-    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
-        ...
-
-
-class GenericBroadcastParser:
-    """specs/005-scoreboard-ocr/'s original clean-token parsing path
-    (FR-007, FR-012-FR-016), relocated verbatim behind the `_ScoreParser`
-    interface -- not rewritten. The universal fallback: `matches()` always
-    returns `True`, so `_select_parser()`'s search always terminates here
-    if no more specific strategy claimed the reading first."""
-
-    name = "generic_broadcast"
-
-    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
-        return True
-
-    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
-        """Locates and parses runs, wickets, over_number/ball_in_over,
-        batter, non_striker, bowler, and run_rate from OCR tokens (FR-007),
-        attributing each field's confidence to the token(s) it came from
-        (research.md) -- a field with no attributable token is simply
-        absent, never fabricated."""
-        parsed: Dict[str, Any] = {}
-        confidences: Dict[str, float] = {}
-        consumed: set = set()
-        over_ball_found = False
-
-        for i, (text, conf) in enumerate(tokens):
-            match = _RUNS_WICKETS_RE.match(text)
-            if match and "runs" not in parsed:
-                parsed["runs"] = int(match.group(1))
-                parsed["wickets"] = int(match.group(2))
-                confidences["runs"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                confidences["wickets"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                consumed.add(i)
-                continue
-
-            match = _OVER_BALL_RE.match(text)
-            if match:
-                if not over_ball_found:
-                    parsed["over_number"] = int(match.group(1))
-                    parsed["ball_in_over"] = int(match.group(2))
-                    confidences["over_number"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                    confidences["ball_in_over"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                    over_ball_found = True
-                elif "run_rate" not in parsed:
-                    parsed["run_rate"] = float(text)
-                    confidences["run_rate"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                consumed.add(i)
-                continue
-
-            if _BOWLER_LABEL_RE.match(text) and i + 1 < len(tokens):
-                next_text, next_conf = tokens[i + 1]
-                if _NAME_RE.match(next_text):
-                    parsed["bowler"] = next_text.rstrip("*")
-                    confidences["bowler"] = next_conf / _TESSERACT_CONFIDENCE_SCALE
-                    consumed.add(i)
-                    consumed.add(i + 1)
-                continue
-
-        for i, (text, conf) in enumerate(tokens):
-            if i in consumed or not _NAME_RE.match(text):
-                continue
-            if text.endswith("*") and "batter" not in parsed:
-                parsed["batter"] = text.rstrip("*")
-                confidences["batter"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                # specs/011-.../research.md Decision 4/6: the attribution
-                # marker applies to both parsers, not only the club-
-                # broadcast one -- this is the "verified" (asterisk-backed)
-                # side of that distinction.
-                parsed["batter_attribution"] = "verified"
-            elif not text.endswith("*") and "non_striker" not in parsed:
-                parsed["non_striker"] = text
-                confidences["non_striker"] = conf / _TESSERACT_CONFIDENCE_SCALE
-
-        return parsed, confidences
-
-
-def _find_stats_marker_positions(tokens: List[Tuple[str, float]]) -> List[int]:
-    """research.md Decision 3: locates every player-stats token, joined
-    ("0(0)", "0-0(0)") or split (a bare integer immediately followed by a
-    separate "(N)" token) -- returns the index to walk backward from in
-    each case (the joined token itself, or the split form's leading bare-
-    integer token)."""
-    positions: List[int] = []
-    i = 0
-    n = len(tokens)
-    while i < n:
-        text = tokens[i][0]
-        if _STATS_MARKER_RE.match(text):
-            positions.append(i)
-            i += 1
-            continue
-        if _BARE_INT_RE.match(text) and i + 1 < n and _PAREN_INT_RE.match(tokens[i + 1][0]):
-            positions.append(i)
-            i += 2
-            continue
-        i += 1
-    return positions
-
-
-def _walk_name_fragment(
-    tokens: List[Tuple[str, float]], anchor_index: int
-) -> Optional[Tuple[str, float]]:
-    """research.md Decision 3: given a stats-marker token's index, collects
-    the consecutive alphabetic-only tokens immediately preceding it (e.g.
-    "SAI" + "KRISHNA" -> "SAI KRISHNA"), stopping at the first non-matching
-    token. Returns `None` if no name-shaped token immediately precedes the
-    marker at all. Confidence is attributed from the fragment closest to
-    the marker (the last one collected, i.e. the rightmost)."""
-    fragments: List[str] = []
-    confidence: Optional[float] = None
-    i = anchor_index - 1
-    while i >= 0 and _CLUB_NAME_FRAGMENT_RE.match(tokens[i][0]):
-        fragments.append(tokens[i][0])
-        if confidence is None:
-            confidence = tokens[i][1]
-        i -= 1
-    if not fragments:
-        return None
-    fragments.reverse()
-    return " ".join(fragments), confidence if confidence is not None else 0.0
-
-
-class ClubBroadcastParser:
-    """specs/011-club-broadcast-overlay-support/'s amendment: a compound
-    score string (`{runs}-{wickets}/{over}.{ball}({total_overs})`) and no
-    text-visible striker/bowler-label convention -- names are instead
-    associated by adjacency to a player-stats token (research.md
-    Decision 3), on a best-effort basis (spec.md FR-004-FR-007)."""
-
-    name = "club_broadcast"
-
-    def matches(self, tokens: List[Tuple[str, float]]) -> bool:
-        return any(_COMPOUND_SCORE_RE.search(text) for text, _ in tokens)
-
-    def parse(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
-        parsed: Dict[str, Any] = {}
-        confidences: Dict[str, float] = {}
-
-        score_index: Optional[int] = None
-        for i, (text, conf) in enumerate(tokens):
-            match = _COMPOUND_SCORE_RE.search(text)
-            if match:
-                parsed["runs"] = int(match.group(1))
-                parsed["wickets"] = int(match.group(2))
-                parsed["over_number"] = int(match.group(3))
-                parsed["ball_in_over"] = int(match.group(4))
-                confidences["runs"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                confidences["wickets"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                confidences["over_number"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                confidences["ball_in_over"] = conf / _TESSERACT_CONFIDENCE_SCALE
-                # research.md Decision 6: preserved verbatim for debugging
-                # without a second OCR pass -- not a public field.
-                parsed["raw_compound_score_token"] = text
-                score_index = i
-                break
-
-        pre_score_names: List[Tuple[str, float]] = []
-        post_score_names: List[Tuple[str, float]] = []
-        for stats_index in _find_stats_marker_positions(tokens):
-            name_and_conf = _walk_name_fragment(tokens, stats_index)
-            if name_and_conf is None:
-                continue
-            if score_index is not None and stats_index > score_index:
-                post_score_names.append(name_and_conf)
-            else:
-                pre_score_names.append(name_and_conf)
-
-        if pre_score_names:
-            name, conf = pre_score_names[0]
-            parsed["batter"] = name
-            confidences["batter"] = conf / _TESSERACT_CONFIDENCE_SCALE
-            # research.md Decision 4/6: "best_effort" -- this is a heuristic
-            # (first-listed name), never a verified strike determination.
-            parsed["batter_attribution"] = "best_effort"
-        if len(pre_score_names) > 1:
-            name, conf = pre_score_names[1]
-            parsed["non_striker"] = name
-            confidences["non_striker"] = conf / _TESSERACT_CONFIDENCE_SCALE
-
-        if post_score_names:
-            name, conf = post_score_names[0]
-            parsed["bowler"] = name
-            confidences["bowler"] = conf / _TESSERACT_CONFIDENCE_SCALE
-
-        return parsed, confidences
-
-
-# research.md Decision 5: `ClubBroadcastParser` is checked first (a narrow,
-# specific signal); `GenericBroadcastParser` is the universal fallback and
-# must stay last so `_select_parser()` always terminates.
-_PARSERS: Tuple[_ScoreParser, ...] = (ClubBroadcastParser(), GenericBroadcastParser())
-
-
-def _select_parser(tokens: List[Tuple[str, float]]) -> _ScoreParser:
-    """Pure, deterministic parser-strategy selection (research.md
-    Decision 5, FR-003) -- the same token list always selects the same
-    parser; no shared state, no caller configuration."""
-    for parser in _PARSERS:
-        if parser.matches(tokens):
-            return parser
-    raise AssertionError("no _ScoreParser matched -- GenericBroadcastParser must always match")
 
 
 class _LastAcceptedReading:
@@ -418,11 +186,18 @@ class ScoreboardOcrExtractor:
         # per-strategy usage counts, folded into output_summary below --
         # no new field on the shared ExecutionDiagnostics dataclass.
         self._parser_strategy_counts: Dict[str, int] = {
-            parser.name: 0 for parser in _PARSERS
+            parser.name: 0 for parser in PARSERS
         }
         self._generic_broadcast_unparsed_count = 0
         self._samples: List[ScoreboardSample] = []
         self._evidence_list: List[OCREvidence] = []
+        # Preprocessing-strategy warm-up/lock state (scoreboard_preprocessing.py):
+        # None until a specific (non-generic) parser is confidently
+        # identified, or PREPROCESSING_WARMUP_SAMPLE_LIMIT is reached --
+        # after which every subsequent frame uses this locked-in strategy
+        # directly, without re-checking.
+        self._locked_strategy_name: Optional[str] = None
+        self._warmup_samples_seen = 0
 
     def __enter__(self) -> "ScoreboardOcrExtractor":
         return self
@@ -619,10 +394,16 @@ class ScoreboardOcrExtractor:
             return None
         return frame[y0:y1, x0:x1]
 
-    def _preprocess_roi(self, roi: np.ndarray) -> np.ndarray:
-        """grayscale -> upscale -> threshold, each independently toggleable
+    def _preprocess_roi(self, roi: np.ndarray, strategy_name: Optional[str] = None) -> np.ndarray:
+        """grayscale -> upscale -> strategy, each independently toggleable
         (research.md: this order preserves more edge detail for Tesseract
-        than thresholding before enlarging)."""
+        than thresholding before enlarging). `strategy_name` selects the
+        final-stage scoreboard_preprocessing.PreprocessingStrategy applied
+        when `preprocess_threshold` is set -- defaults to
+        `DEFAULT_STRATEGY_NAME` (Otsu, this platform's original behavior)
+        when not given, so every existing direct caller of this method
+        (tests, and any run before warm-up has locked in a format-specific
+        choice) is unaffected."""
         request = self._request
         image = roi
 
@@ -640,7 +421,8 @@ class ScoreboardOcrExtractor:
 
         if request.preprocess_threshold:
             gray_for_threshold = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-            _, image = cv2.threshold(gray_for_threshold, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            strategy = PREPROCESSING_STRATEGIES[strategy_name or DEFAULT_STRATEGY_NAME]
+            image = strategy.apply(gray_for_threshold)
 
         return image
 
@@ -671,18 +453,19 @@ class ScoreboardOcrExtractor:
         return raw_text, overall_confidence, tokens
 
     # -- internal: structured-parsing stage ---------------------------------
-    # specs/011-club-broadcast-overlay-support/ research.md Decision 5: this
-    # is now a thin dispatcher over the `_ScoreParser` Strategy interface
-    # (`_select_parser()` + `_PARSERS`, module level, above) rather than
-    # owning the parsing logic itself -- kept as a same-named method so
-    # every existing caller/test continues to work unmodified (FR-002).
+    # This is a thin dispatcher over scoreboard_parsers.py's pluggable
+    # `ScoreboardParser` architecture (`select_parser()` + `PARSERS`)
+    # rather than owning any parsing logic itself -- kept as a same-named
+    # method so every existing caller/test continues to work unmodified.
 
     def _parse_fields(self, tokens: List[Tuple[str, float]]) -> Tuple[Dict[str, Any], Dict[str, float]]:
-        """Selects the applicable `_ScoreParser` (research.md Decision 5,
-        FR-003) and delegates to it. See `GenericBroadcastParser` for the
-        original spec's clean-token path and `ClubBroadcastParser` for the
-        club-broadcast-overlay amendment's compound-score path."""
-        selected_parser = _select_parser(tokens)
+        """Selects the applicable `ScoreboardParser` (see
+        scoreboard_parsers.py) and delegates to it. See
+        `GenericBroadcastParser` for the original spec's clean-token path,
+        `ClubBroadcastParser` for the club-broadcast-overlay amendment's
+        compound-score path, and `SeparateTokenBroadcastParser` for the
+        third, separate-token format."""
+        selected_parser = select_parser(tokens)
         parsed_fields, field_confidences = selected_parser.parse(tokens)
         parsed_fields["parser_strategy"] = selected_parser.name
         return parsed_fields, field_confidences
@@ -716,9 +499,9 @@ class ScoreboardOcrExtractor:
 
         Parser-agnostic by construction (specs/011-.../FR-009): this method
         only ever reads keys out of `parsed_fields`, never which
-        `_ScoreParser` produced them -- the same validation logic applies
-        identically to a `GenericBroadcastParser`- or `ClubBroadcastParser`-
-        produced reading."""
+        `ScoreboardParser` produced them -- the same validation logic
+        applies identically regardless of which registered parser
+        (scoreboard_parsers.py) produced the reading."""
         runs = parsed_fields.get("runs")
         wickets = parsed_fields.get("wickets")
         over_number = parsed_fields.get("over_number")
@@ -809,6 +592,33 @@ class ScoreboardOcrExtractor:
 
     # -- internal: per-frame orchestration -----------------------------------
 
+    def _advance_preprocessing_warmup(self, parser_name: Optional[str]) -> None:
+        """scoreboard_preprocessing.py's warm-up-then-lock selection: a
+        no-op once `self._locked_strategy_name` is already set. Otherwise,
+        locks in `parser_name`'s declared preferred strategy the moment a
+        *specific* (non-generic) parser is identified -- a single
+        confident match is enough, no run of consecutive agreement
+        required, since a specific parser's `matches()` signature has been
+        observed to be a strong, non-coincidental signal on its own
+        (scoreboard_parsers.py's own mutual-exclusivity contract, verified
+        in tests/contract/test_scoreboard_parsers_contract.py). If
+        `PREPROCESSING_WARMUP_SAMPLE_LIMIT` samples pass without ever
+        seeing a specific parser (e.g. an unrecognized fourth format, or a
+        run of undetectable frames), locks to `DEFAULT_STRATEGY_NAME`
+        (Otsu) permanently -- the same behavior this platform already had
+        before this amendment, for the cases this amendment doesn't
+        change anything about."""
+        if self._locked_strategy_name is not None:
+            return
+
+        if parser_name is not None and parser_name != GenericBroadcastParser.name:
+            self._locked_strategy_name = PARSER_PREFERRED_STRATEGY.get(parser_name, DEFAULT_STRATEGY_NAME)
+            return
+
+        self._warmup_samples_seen += 1
+        if self._warmup_samples_seen >= PREPROCESSING_WARMUP_SAMPLE_LIMIT:
+            self._locked_strategy_name = DEFAULT_STRATEGY_NAME
+
     def _process_frame(
         self,
         roi: Optional[np.ndarray],
@@ -818,10 +628,11 @@ class ScoreboardOcrExtractor:
         if roi is None:
             return self._undetectable_sample(timestamp_seconds), self._undetectable_evidence()
 
-        preprocessed = self._preprocess_roi(roi)
+        preprocessed = self._preprocess_roi(roi, self._locked_strategy_name)
         raw_text, ocr_confidence, tokens = self._run_ocr(preprocessed)
 
         if not tokens:
+            self._advance_preprocessing_warmup(parser_name=None)
             sample = self._undetectable_sample(timestamp_seconds, raw_text=raw_text)
             evidence = OCREvidence(
                 raw_text=raw_text, preprocessed_image_ref=preprocessed.copy(), ocr_confidence=0.0
@@ -829,6 +640,7 @@ class ScoreboardOcrExtractor:
             return sample, evidence
 
         parsed_fields, field_confidences = self._parse_fields(tokens)
+        self._advance_preprocessing_warmup(parser_name=parsed_fields.get("parser_strategy"))
         validation_passed, failure_reason = self._validate_reading(parsed_fields, baseline)
 
         if validation_passed:
@@ -938,11 +750,18 @@ class ScoreboardOcrExtractor:
         request = self._request
         source = request.load_result.source
         source_id = source.file_hash if source is not None else None
+        # Which ScoreboardParser implementations were even available this
+        # run, and what layout each one claims to recognize -- combined
+        # with output_summary's `parser_strategy` usage counts below, this
+        # answers "which parser was selected, and why" without needing to
+        # read scoreboard_parsers.py's source.
+        parser_registry = "; ".join(f"{parser.name}: {parser.description}" for parser in PARSERS)
         input_summary = (
             f"source_video_id={source_id} scoreboard_region={request.scoreboard_region} "
             f"preprocess=(grayscale={request.preprocess_grayscale},"
             f"threshold={request.preprocess_threshold},upscale={request.preprocess_upscale}) "
-            f"min_confidence={request.min_confidence}"
+            f"min_confidence={request.min_confidence} "
+            f"parser_registry=({parser_registry})"
         )
 
         ocr_confidences = [s.ocr_confidence for s in self._samples]
@@ -968,6 +787,8 @@ class ScoreboardOcrExtractor:
             f"roi_unchanged_skip_count={self._skipped_count} "
             f"parser_strategy=({parser_strategy_breakdown}) "
             f"generic_broadcast_unparsed_count={self._generic_broadcast_unparsed_count} "
+            f"preprocessing_strategy_locked={self._locked_strategy_name or 'none'} "
+            f"preprocessing_warmup_samples={self._warmup_samples_seen} "
             f"configuration_version=1"
         )
         return self._tracker.build(

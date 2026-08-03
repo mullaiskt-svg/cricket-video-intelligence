@@ -238,4 +238,21 @@ This is a genuine, isolated improvement directly attributable to this one fix (E
 | Now-recognized (no longer generic_broadcast) | 5.5% (11/200) | 12.5% (25/200) | **19.0% (38/200)** |
 | `bare_over_ball_present_but_no_paren_sibling_at_all` (unrecovered) | 29.0% (58/200) | 29.0% (58/200) | 23.0% (46/200) |
 
-Round 3 alone recovers 12 more samples in its target bucket (58 -> 46); combined with round 2, 27 of 200 residual-failure samples in this fixed sample (13.5%) are now recognized that weren't before either fix -- roughly triple round 2's standalone gain. Same caveat as round 2: not yet re-measured as an end-to-end recall/precision number against a fresh full OCR pass. The `neither_score_nor_over_ball_token_present` (35.0%) bucket remains completely untouched and unexplained -- likely genuine non-scoreboard scene content, but not yet visually confirmed against the actual frames.
+Round 3 alone recovers 12 more samples in its target bucket (58 -> 46); combined with round 2, 27 of 200 residual-failure samples in this fixed sample (13.5%) are now recognized that weren't before either fix -- roughly triple round 2's standalone gain. The `neither_score_nor_over_ball_token_present` (35.0%) bucket remains completely untouched and unexplained -- likely genuine non-scoreboard scene content, but not yet visually confirmed against the actual frames.
+
+## Combined End-to-End Impact (rounds 2+3, full real-match re-run)
+
+**Measurement** (`run_third_match_ocr_v5.py`, a fresh, full ~88-minute OCR pass over the same Wild Wanderers vs Phoenix Firehawks match with both round-2 and round-3 fixes applied -- `third_match_raw_ocr_v5.csv`/`third_match_events_v5.csv` vs. the round-1-only `..._v4.csv` baseline):
+
+| Metric | v4 (round 1 only) | v5 (rounds 1+2+3) |
+|---|---|---|
+| `separate_token_broadcast` parser share | 36.3% (4,156/11,434) | **46.5% (5,316/11,434)** |
+| `generic_broadcast` share | 61.3% (7,012/11,434) | 51.2% (5,852/11,434) |
+| `generic_broadcast` with nothing usable extracted | 38.4% (4,389/11,434) | 34.6% (3,960/11,434) |
+| Distinct score states (Event Detection) | 37 | 40 |
+| Comparisons processed | 29 | 34 |
+| Anomalous transitions discarded | 7 | 5 |
+| Recall vs. 57 ground-truth events | 14.0% (8/57) | **14.0% (8/57), unchanged** |
+| Precision (scoring events) | 80.0% (8/10) | 72.7% (8/11) |
+
+Raw OCR yield genuinely improved, measurably and substantially, exactly as the per-frame sampling predicted (`separate_token_broadcast` share +10.2 points; unparsed-generic share -3.8 points). **Recall against ground truth did not move at all -- the same 8/57 events, the same per-type breakdown (FOUR 6/29, SIX 1/11, WICKET 1/17) -- and precision got slightly worse** (one new false positive: a WICKET at t=3133.0s with no nearby ground-truth WICKET, in addition to the two false positives already present in v4). This is a real, informative non-change, not a wash: it demonstrates that recovering more raw over.ball/score tokens from this broadcast is not, on its own, the same problem as recovering more *ground-truth-matching* events -- the additional ~1,160 samples rounds 2+3 moved out of `generic_broadcast` are producing more distinct states and more comparisons (37->40, 29->34) without those states landing on the specific overs/balls the 57 labeled events actually occurred on, and are introducing at least as much new noise as new signal. Per this project's established discipline (do not overstate a partial win, and do not touch Event Detection while OCR quality is still the isolated bottleneck), the next OCR investigation should shift from "recover more raw tokens generically" toward frame-level analysis specifically anchored on the ground-truth events' own timestamps -- confirming whether OCR is failing at the exact moments boundaries/wickets occur, which this round's evenly-spread sampling approach was not designed to detect.

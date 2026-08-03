@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
-from cvip.video.ocr_timeline_smoother_models import CleanedScoreboardSample, OCRTimelineSmootherResult
+from cvip.events.state_transition_models import ScoreState
+from cvip.video.ocr_timeline_smoother_models import OCRTimelineSmootherResult
 from cvip.video.replay_detection_models import ReplayDetectionResult
 from cvip.video.scoreboard_ocr_models import ScoreboardOcrResult, ScoreboardSample
 
@@ -51,10 +52,22 @@ class EventEvidence:
     `EventEvidence` records sharing the same `previous_reading`/
     `current_reading`/deltas but different `rule_fired`/
     `milestone_thresholds_crossed`.
+
+    Post-implementation amendment (State Transition Detection,
+    state_transition.py): `previous_reading`/`current_reading` are now
+    `ScoreState`, not `CleanedScoreboardSample` -- the Comparison Engine
+    compares consecutive distinct score states, not consecutive raw
+    per-second samples, and `ScoreState`'s own provenance fields
+    (`sample_count`, `first_seen_timestamp`/`last_seen_timestamp`,
+    `average_ocr_confidence`) are strictly more useful for this evidence
+    record's own debugging/analytics purpose than the raw sample they
+    replace. `ScoreState.timestamp_seconds` is a property aliasing
+    `first_seen_timestamp`, so every existing consumer of
+    `.timestamp_seconds` on these two fields is unaffected.
     """
 
-    previous_reading: CleanedScoreboardSample
-    current_reading: CleanedScoreboardSample
+    previous_reading: ScoreState
+    current_reading: ScoreState
     runs_delta: Optional[int]
     wickets_delta: Optional[int]
     is_single_ball_advance: bool

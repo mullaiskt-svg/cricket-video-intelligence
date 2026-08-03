@@ -261,3 +261,130 @@ def test_repeated_runs_produce_identical_event_sequences():
         second_result = runner.run()
 
     assert first_result.events == second_result.events
+
+
+# --- State Transition Detection integration (post-implementation amendment,
+# state_transition.py): the Comparison Engine now runs over distinct score
+# states rather than raw per-second samples -- these scenarios cover the
+# collapsing/null-handling/anomaly-discarding behavior end-to-end through
+# EventDetectionRunner, on top of state_transition.py's own unit tests. ----
+
+
+def test_many_repeated_identical_readings_collapse_to_one_comparison():
+    """A broadcast overlay holds a score on screen across many consecutive
+    1fps samples -- pre-amendment, the raw sample count itself dictated
+    how many comparisons ran; now it should always be states-minus-one,
+    regardless of how many raw samples fed each state."""
+    samples = [_cleaned(float(i), runs=10, ball_in_over=1) for i in range(15)]
+    samples += [_cleaned(float(i), runs=14, ball_in_over=2) for i in range(15, 30)]  # FOUR
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    assert runner._raw_sample_count == 30
+    assert runner._distinct_state_count == 2
+    assert runner._comparisons_processed == 1
+    assert [e.event_type for e in result.events] == ["FOUR"]
+
+
+def test_null_core_samples_between_identical_states_do_not_inflate_comparisons():
+    samples = [
+        _cleaned(0.0, runs=10, ball_in_over=1),
+        _cleaned(1.0, runs=10, ball_in_over=1),
+        _null_cleaned(2.0),
+        _null_cleaned(3.0),
+        _cleaned(4.0, runs=10, ball_in_over=1),
+        _cleaned(5.0, runs=14, ball_in_over=2),  # FOUR
+    ]
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    assert runner._distinct_state_count == 2  # the nulls contributed no state of their own
+    assert runner._comparisons_processed == 1
+    assert [e.event_type for e in result.events] == ["FOUR"]
+
+
+def test_null_core_sample_between_different_states_does_not_block_detection():
+    samples = [
+        _cleaned(0.0, runs=10, ball_in_over=1),
+        _null_cleaned(1.0),  # a single dropped/unreadable frame between two real states
+        _cleaned(2.0, runs=14, ball_in_over=2),  # FOUR
+    ]
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    assert runner._distinct_state_count == 2
+    assert [e.event_type for e in result.events] == ["FOUR"]
+
+
+def test_transient_blip_reverting_to_a_prior_score_still_produces_two_comparisons():
+    """A distinct state that coincidentally matches an earlier (non-adjacent)
+    state is not retroactively merged with it (state_transition.py's own
+    collapsing rule only merges *consecutive* identical readings) -- so a
+    misread that reverts the score still walks through two comparisons, the
+    second of which fires no rule (a runs decrease matches no FOUR/SIX/
+    WICKET rule and is not an innings transition, since wickets did not also
+    decrease) but is still processed, not silently dropped or misclassified
+    as anomalous."""
+    samples = [
+        _cleaned(0.0, runs=10, wickets=0, ball_in_over=1),
+        _cleaned(1.0, runs=14, wickets=0, ball_in_over=2),  # FOUR
+        _cleaned(2.0, runs=10, wickets=0, ball_in_over=1),  # blip: reverts, not an innings transition
+    ]
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    assert runner._distinct_state_count == 3
+    assert runner._comparisons_processed == 2
+    assert runner._anomalous_transitions_count == 0
+    assert [e.event_type for e in result.events] == ["FOUR"]
+
+
+def test_anomalous_transition_is_discarded_and_does_not_poison_the_next_comparison():
+    """The last-good-baseline design (detection.py's run() loop docstring):
+    a corrupted state -- an implausible single-ball runs jump, e.g. an OCR
+    misread -- is discarded and does NOT become the baseline for the next
+    comparison, so the delivery immediately after it is still correctly
+    compared against the last *accepted* good state, not the corrupted
+    one."""
+    samples = [
+        _cleaned(0.0, runs=150, wickets=4, over_number=17, ball_in_over=3),
+        _cleaned(1.0, runs=1153, wickets=4, over_number=17, ball_in_over=4),  # corrupted misread
+        _cleaned(2.0, runs=154, wickets=4, over_number=17, ball_in_over=4),  # genuine FOUR vs. the *first* state
+    ]
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    assert runner._distinct_state_count == 3
+    assert runner._anomalous_transitions_count == 1
+    assert runner._comparisons_processed == 1
+    assert [e.event_type for e in result.events] == ["FOUR"]
+    assert result.events[0].timestamp_seconds == 2.0
+
+
+def test_anomalous_transition_examples_and_counters_reported_in_diagnostics(mocker):
+    emit_spy = mocker.patch("cvip.events.detection.emit_diagnostics")
+    samples = [
+        _cleaned(0.0, runs=150, wickets=4, over_number=17, ball_in_over=3),
+        _cleaned(1.0, runs=1153, wickets=4, over_number=17, ball_in_over=4),  # corrupted misread
+        _cleaned(2.0, runs=154, wickets=4, over_number=17, ball_in_over=4),
+    ]
+    request = _request(samples)
+
+    with detect_events(request) as runner:
+        runner.run()
+
+    output_summary = emit_spy.call_args[0][0].output_summary
+    assert "raw_sample_count=3" in output_summary
+    assert "distinct_state_count=3" in output_summary
+    assert "anomalous_transitions_discarded=1" in output_summary
+    assert "runs_delta=" in output_summary  # the discarded transition's reason string

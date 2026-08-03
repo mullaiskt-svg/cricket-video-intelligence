@@ -13,11 +13,13 @@ from cvip.video.scoreboard_parsers import (
     ClubBroadcastParser,
     GenericBroadcastParser,
     SeparateTokenBroadcastParser,
+    _BARE_TOTAL_OVERS_RE,
     _COMPOUND_SCORE_RE,
     _FUSED_OVER_BALL_PAREN_RE,
     _PAREN_TOTAL_OVERS_RE,
     _SEPARATE_OVER_BALL_RE,
     _SEPARATE_SCORE_RE,
+    _find_bare_sibling_over_ball_index,
     _find_stats_marker_positions,
     _find_split_over_ball_index,
     _locate_over_ball,
@@ -408,3 +410,65 @@ def test_separate_token_broadcast_recovers_reading_from_fused_over_ball_token():
     parsed, _ = parser.parse(tokens)
     assert (parsed["runs"], parsed["wickets"]) == (0, 0)
     assert (parsed["over_number"], parsed["ball_in_over"]) == (0, 0)
+
+
+# =============================================================================
+# Post-implementation amendment, round 3 (ground_truth_v2/investigate_missing_paren_sibling.py):
+# a full-detail dump of round 2's remaining "bare over.ball, no recognized
+# paren sibling" failures found their single most common real shape, by a
+# wide margin, is a total-overs token that *is* still its own separate,
+# correctly-positioned token -- just missing its opening "(" entirely,
+# while keeping its digits and closing bracket. Each example token below
+# is taken verbatim from that real capture
+# (ground_truth_v2/investigate_missing_paren_sibling_output.log), not
+# synthesized.
+# =============================================================================
+
+
+def test_bare_total_overs_re_matches_digits_plus_closing_bracket_only():
+    assert _BARE_TOTAL_OVERS_RE.match("20)") is not None  # real: t=3389.0
+    assert _BARE_TOTAL_OVERS_RE.match("20}") is not None  # real: t=9073.0
+    assert _BARE_TOTAL_OVERS_RE.match("20]") is not None  # real: t=10624.0
+    assert _BARE_TOTAL_OVERS_RE.match("20))") is not None  # real: t=5060.0, trailing noise tolerated
+
+
+def test_bare_total_overs_re_rejects_tokens_without_a_closing_bracket():
+    """Not a license to match any short digit token -- a genuinely
+    unrelated numeric fragment (no bracket at all) must not be mistaken
+    for a total-overs reading."""
+    assert _BARE_TOTAL_OVERS_RE.match("20") is None  # real: t=9823.0 (even more degraded, unrecoverable)
+    assert _BARE_TOTAL_OVERS_RE.match("205") is None
+
+
+def test_find_bare_sibling_over_ball_index_locates_real_pair():
+    tokens = [("128-6", 71.0), ("13.3", 95.0), ("20)", 64.0)]
+    assert _find_bare_sibling_over_ball_index(tokens) == 1
+
+
+def test_find_bare_sibling_over_ball_index_returns_none_when_absent():
+    assert _find_bare_sibling_over_ball_index(HAPPY_PATH_TOKENS) is None
+    assert _find_bare_sibling_over_ball_index(SEPARATE_TOKEN_TOKENS) is None  # already has the real "(20)"
+
+
+def test_locate_over_ball_falls_back_to_bare_sibling_shape():
+    """Tried only after both the clean split and fused shapes fail to
+    match -- a token list satisfying an earlier shape never reaches this
+    fallback."""
+    tokens = [("136-9", 41.0), ("18.0", 76.0), ("20]", 4.0), ("Vinay", 4.0)]
+    index, over, ball, conf = _locate_over_ball(tokens)
+    assert (index, over, ball) == (1, 18, 0)
+    assert conf == pytest.approx(76.0)
+
+
+def test_separate_token_broadcast_recovers_reading_from_bare_sibling_total_overs():
+    """The end-to-end case this round-3 amendment exists for: real tokens
+    captured from a frame previously discarded entirely because the
+    total-overs token, though still cleanly separate and correctly
+    positioned, lost its opening "(" character."""
+    tokens = [("|", 61.0), ("128-6", 71.0), ("13.3", 0.0), ("20)", 96.0), ("Srikanth", 91.0)]
+    parser = SeparateTokenBroadcastParser()
+
+    assert parser.matches(tokens) is True
+    parsed, _ = parser.parse(tokens)
+    assert (parsed["runs"], parsed["wickets"]) == (128, 6)
+    assert (parsed["over_number"], parsed["ball_in_over"]) == (13, 3)

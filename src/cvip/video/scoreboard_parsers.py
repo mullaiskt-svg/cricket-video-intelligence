@@ -379,6 +379,20 @@ _PAREN_TOTAL_OVERS_RE = re.compile(r"^\W{0,2}\((\d+)\)")
 # all) has nothing left to recover here either, the same documented,
 # un-recovered limit `_PAREN_TOTAL_OVERS_RE`'s own tests already establish.
 _FUSED_OVER_BALL_PAREN_RE = re.compile(r"^(\d+)\.(\d+)\D{0,3}\((\d+)\)")
+
+# Post-implementation amendment (round 3, ground_truth_v2/investigate_missing_paren_sibling.py):
+# a full-detail dump of every real frame in round 2's remaining
+# "bare over.ball, no recognized paren sibling" bucket found the single
+# most common real shape, by a wide margin, is neither "fused into one
+# token" (round 2's fix) nor "opening paren merged into the next word"
+# (the documented, un-recovered case) -- it's a total-overs token that
+# *is* still its own separate, correctly-positioned token, immediately
+# after the over.ball token, but has lost exactly its opening "("
+# character while keeping its digits and closing bracket intact (e.g.
+# "13.3" "20)", "14.0" "20}", "18.0" "20]"). `_PAREN_TOTAL_OVERS_RE`
+# requires the literal "(" unconditionally, so it can never match this
+# token no matter how much trailing noise it already tolerates.
+_BARE_TOTAL_OVERS_RE = re.compile(r"^(\d{1,2})[\)\]\}]")
 _CRR_LABEL_RE = re.compile(r"^CRR:?$", re.IGNORECASE)
 _DECIMAL_RE = re.compile(r"^\d+\.\d+$")
 _SEPARATE_TOKEN_NAME_RE = re.compile(r"^[A-Za-z]+$")
@@ -407,19 +421,35 @@ def _find_split_over_ball_index(tokens: List[Tuple[str, float]]) -> Optional[int
     return None
 
 
+def _find_bare_sibling_over_ball_index(tokens: List[Tuple[str, float]]) -> Optional[int]:
+    """Returns the index of a bare over.ball token immediately followed by
+    a total-overs token that kept its digits and closing bracket but lost
+    its opening "(" entirely -- e.g. "20)" rather than "(20)". Distinct
+    from `_find_split_over_ball_index` (which still requires the literal
+    "(", however noisy around it) and from the fused-single-token case
+    (`_FUSED_OVER_BALL_PAREN_RE`): here the total-overs reading is still
+    its own, correctly-positioned separate token."""
+    for i in range(len(tokens) - 1):
+        if _SEPARATE_OVER_BALL_RE.match(tokens[i][0]) and _BARE_TOTAL_OVERS_RE.match(tokens[i + 1][0]):
+            return i
+    return None
+
+
 def _locate_over_ball(
     tokens: List[Tuple[str, float]],
 ) -> Optional[Tuple[int, int, int, float]]:
-    """This format's over.ball signature, in either shape Tesseract has
-    been observed to actually produce it in: the two-*separate*-tokens
-    shape (`_find_split_over_ball_index`), tried first since it is the
-    more common, cleaner case; falling back to the single-*fused*-token
-    shape (`_FUSED_OVER_BALL_PAREN_RE`) a space-drop can produce. Returns
-    `(token_index, over_number, ball_in_over, confidence)`, or `None` if
-    neither shape is found -- `token_index` is always a single index into
-    `tokens` either way, so every caller that scans forward/backward from
-    it (the score lookup, the bowler-figures lookup below) works
-    identically regardless of which shape actually matched."""
+    """This format's over.ball signature, in any of the shapes Tesseract
+    has been observed to actually produce it in, tried in order from most
+    to least common/clean: the two-*separate*-tokens shape
+    (`_find_split_over_ball_index`); the single-*fused*-token shape a
+    space-drop can produce (`_FUSED_OVER_BALL_PAREN_RE`); and a still-
+    separate total-overs token missing only its opening "("
+    (`_find_bare_sibling_over_ball_index`). Returns `(token_index,
+    over_number, ball_in_over, confidence)`, or `None` if no shape is
+    found -- `token_index` is always a single index into `tokens`
+    regardless of which shape actually matched, so every caller that scans
+    forward/backward from it (the score lookup, the bowler-figures lookup
+    below) works identically either way."""
     split_index = _find_split_over_ball_index(tokens)
     if split_index is not None:
         match = _SEPARATE_OVER_BALL_RE.match(tokens[split_index][0])
@@ -429,6 +459,11 @@ def _locate_over_ball(
         fused_match = _FUSED_OVER_BALL_PAREN_RE.match(text)
         if fused_match:
             return i, int(fused_match.group(1)), int(fused_match.group(2)), confidence
+
+    bare_sibling_index = _find_bare_sibling_over_ball_index(tokens)
+    if bare_sibling_index is not None:
+        match = _SEPARATE_OVER_BALL_RE.match(tokens[bare_sibling_index][0])
+        return bare_sibling_index, int(match.group(1)), int(match.group(2)), tokens[bare_sibling_index][1]
 
     return None
 

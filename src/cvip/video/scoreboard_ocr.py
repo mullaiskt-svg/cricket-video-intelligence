@@ -62,7 +62,11 @@ BALL_IN_OVER_MAX = 6
 
 # How many samples to preprocess with scoreboard_preprocessing.py's
 # DEFAULT_STRATEGY_NAME (Otsu) before giving up on identifying a specific
-# broadcast format and locking Otsu in permanently for this run. In
+# broadcast format and locking Otsu in permanently for this run. Each
+# counted warm-up sample also trials every other registered strategy
+# against that same frame before giving up on it (see _process_frame),
+# so this ceiling bounds "frames whose ROI was undetectable/generic under
+# every strategy," not just "frames Otsu alone couldn't parse." In
 # practice this rarely matters: a specific parser's `matches()` signature
 # has been observed to fire on the very first successfully-tokenized
 # frame, so this ceiling only bounds the worst case (e.g. a run whose
@@ -619,6 +623,21 @@ class ScoreboardOcrExtractor:
         if self._warmup_samples_seen >= PREPROCESSING_WARMUP_SAMPLE_LIMIT:
             self._locked_strategy_name = DEFAULT_STRATEGY_NAME
 
+    def _ocr_and_parse(
+        self, roi: np.ndarray, strategy_name: str
+    ) -> Tuple[np.ndarray, str, float, List[Tuple[str, float]], Dict[str, Any], Dict[str, float]]:
+        """Preprocess `roi` with `strategy_name` and run it through OCR +
+        field parsing, with no side effects (no baseline mutation, no
+        warm-up/diagnostics bookkeeping) -- so warm-up can trial multiple
+        strategies against the same frame and only commit to one
+        afterward, via `_process_frame` below."""
+        preprocessed = self._preprocess_roi(roi, strategy_name)
+        raw_text, ocr_confidence, tokens = self._run_ocr(preprocessed)
+        if not tokens:
+            return preprocessed, raw_text, ocr_confidence, tokens, {}, {}
+        parsed_fields, field_confidences = self._parse_fields(tokens)
+        return preprocessed, raw_text, ocr_confidence, tokens, parsed_fields, field_confidences
+
     def _process_frame(
         self,
         roi: Optional[np.ndarray],
@@ -628,8 +647,63 @@ class ScoreboardOcrExtractor:
         if roi is None:
             return self._undetectable_sample(timestamp_seconds), self._undetectable_evidence()
 
-        preprocessed = self._preprocess_roi(roi, self._locked_strategy_name)
-        raw_text, ocr_confidence, tokens = self._run_ocr(preprocessed)
+        strategy_name = self._locked_strategy_name or DEFAULT_STRATEGY_NAME
+        preprocessed, raw_text, ocr_confidence, tokens, parsed_fields, field_confidences = self._ocr_and_parse(
+            roi, strategy_name
+        )
+        parser_name = parsed_fields.get("parser_strategy") if tokens else None
+
+        parser_found_no_score_data = (
+            parser_name == GenericBroadcastParser.name
+            and parsed_fields.get("runs") is None
+            and parsed_fields.get("wickets") is None
+        )
+        if self._locked_strategy_name is None and (parser_name is None or parser_found_no_score_data):
+            # Still warming up, and this strategy produced nothing usable
+            # on this frame: either no tokens at all, or tokens that fell
+            # through every specific parser to the universal
+            # GenericBroadcastParser fallback (which always "matches") with
+            # no score data extracted either -- as opposed to a frame that
+            # genuinely fell through to, and was correctly read by, that
+            # same fallback (e.g. the "original" format, which also stays
+            # on Otsu; a runs/wickets-bearing generic_broadcast reading is
+            # never subject to this trial). Otsu's own failure mode on a
+            # format it can't binarize correctly is for that format's
+            # frames to look undetectable or generic-with-no-score-data in
+            # the first place (module docstring, scoreboard_preprocessing.py)
+            # -- so judging warm-up solely by Otsu's result never gives such
+            # a format a chance to be recognized, and a run of unlucky early
+            # frames permanently locks Otsu for the whole run even though a
+            # later frame preprocessed with the right strategy would have
+            # matched (review finding on this PR). Before spending this
+            # frame's warm-up sample, trial the other registered strategies
+            # against the *same* frame -- bounded to the warm-up window, not
+            # every frame, so this doesn't reintroduce the per-frame
+            # multi-strategy cost the module docstring explicitly rules out
+            # for steady state.
+            for alt_name in PREPROCESSING_STRATEGIES:
+                if alt_name == strategy_name:
+                    continue
+                (
+                    alt_preprocessed,
+                    alt_raw_text,
+                    alt_confidence,
+                    alt_tokens,
+                    alt_parsed_fields,
+                    alt_field_confidences,
+                ) = self._ocr_and_parse(roi, alt_name)
+                alt_parser_name = alt_parsed_fields.get("parser_strategy") if alt_tokens else None
+                if alt_parser_name is not None and alt_parser_name != GenericBroadcastParser.name:
+                    preprocessed, raw_text, ocr_confidence, tokens, parsed_fields, field_confidences = (
+                        alt_preprocessed,
+                        alt_raw_text,
+                        alt_confidence,
+                        alt_tokens,
+                        alt_parsed_fields,
+                        alt_field_confidences,
+                    )
+                    parser_name = alt_parser_name
+                    break
 
         if not tokens:
             self._advance_preprocessing_warmup(parser_name=None)
@@ -639,8 +713,7 @@ class ScoreboardOcrExtractor:
             )
             return sample, evidence
 
-        parsed_fields, field_confidences = self._parse_fields(tokens)
-        self._advance_preprocessing_warmup(parser_name=parsed_fields.get("parser_strategy"))
+        self._advance_preprocessing_warmup(parser_name=parser_name)
         validation_passed, failure_reason = self._validate_reading(parsed_fields, baseline)
 
         if validation_passed:

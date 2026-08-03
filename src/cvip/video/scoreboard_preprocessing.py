@@ -26,16 +26,24 @@ validation logic.
 
 Preprocessing happens *before* OCR produces tokens, so it cannot be
 selected from tokens the way `select_parser()` selects a parser -- and
-deliberately does not try multiple strategies per frame (that would add a
-second Tesseract call to every frame that needs it, and this module is
-already the platform's single largest per-run performance-budget line
-item). Instead, `ScoreboardOcrExtractor` runs a small, bounded warm-up
-using this module's `DEFAULT_STRATEGY_NAME` (Otsu): once a specific
-(non-generic) `ScoreboardParser` is confidently identified from a warm-up
-frame, that parser's own declared `preferred_preprocessing_strategy` is
-locked in for the remainder of the run -- a single OCR pass per frame in
-the common case, both during steady-state and (for the two already-working
-formats, which stay on Otsu) during warm-up too.
+deliberately does not try multiple strategies per frame once a strategy is
+locked in (that would add a second Tesseract call to every frame for the
+remainder of the run, and this module is already the platform's single
+largest per-run performance-budget line item). Instead,
+`ScoreboardOcrExtractor` runs a small, bounded warm-up using this module's
+`DEFAULT_STRATEGY_NAME` (Otsu) as its first attempt per frame: once a
+specific (non-generic) `ScoreboardParser` is confidently identified, that
+parser's own declared `preferred_preprocessing_strategy` is locked in for
+the remainder of the run -- a single OCR pass per frame in steady state,
+including for the two already-working formats, which stay on Otsu. Only
+while still warming up, and only on a frame where Otsu's result doesn't
+confidently identify a format, does the extractor also trial the other
+registered strategies against that same frame before spending the frame's
+warm-up budget on it -- Otsu's own failure mode on a format it can't
+binarize correctly is for that format's frames to look undetectable or
+generic in the first place, so judging warm-up by Otsu's result alone
+would never let such a format be recognized. This extra cost is bounded to
+`PREPROCESSING_WARMUP_SAMPLE_LIMIT` frames, not every frame.
 
 ## Adding a new preprocessing strategy
 

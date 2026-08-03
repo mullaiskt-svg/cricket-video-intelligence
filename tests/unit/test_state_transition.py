@@ -194,17 +194,42 @@ def test_normal_single_ball_boundary_is_not_anomalous():
     assert is_anomalous_transition(previous, current) is None
 
 
-def test_wickets_delta_exceeding_ceiling_is_anomalous():
+def test_wickets_delta_exceeding_ceiling_with_no_ball_advance_is_anomalous():
+    """No ball advance at all falls back to the flat hat-trick ceiling
+    (same fallback rationale as runs_delta's single-ball bound below)."""
     previous = _state(runs=10, wickets=0, over_number=1, ball_in_over=1)
-    current = _state(runs=10, wickets=MAX_PLAUSIBLE_WICKETS_PER_TRANSITION + 1, over_number=5, ball_in_over=1)
+    current = _state(runs=10, wickets=MAX_PLAUSIBLE_WICKETS_PER_TRANSITION + 1, over_number=1, ball_in_over=1)
     reason = is_anomalous_transition(previous, current)
     assert reason is not None and "wickets_delta" in reason
 
 
-def test_wickets_delta_at_ceiling_is_not_anomalous():
+def test_wickets_delta_at_ceiling_with_no_ball_advance_is_not_anomalous():
     previous = _state(runs=10, wickets=0, over_number=1, ball_in_over=1)
-    current = _state(runs=10, wickets=MAX_PLAUSIBLE_WICKETS_PER_TRANSITION, over_number=5, ball_in_over=1)
+    current = _state(runs=10, wickets=MAX_PLAUSIBLE_WICKETS_PER_TRANSITION, over_number=1, ball_in_over=1)
     assert is_anomalous_transition(previous, current) is None
+
+
+def test_wickets_delta_within_multi_ball_gap_is_not_anomalous():
+    """Regression test (PR #13 review finding): a legitimate multi-over
+    OCR gap where several wickets genuinely fell (e.g. 0/1.1 -> 4/5.1, 24
+    balls advanced) must not be flagged anomalous just because the wickets
+    delta exceeds the flat single-transition ceiling -- once scaled by
+    balls advanced (at most one wicket per ball), it's well within bounds.
+    Before this fix, rejecting this transition would also have kept every
+    later state comparing against the stale pre-gap baseline, cascading
+    into rejecting the rest of the innings too."""
+    previous = _state(runs=10, wickets=0, over_number=1, ball_in_over=1)
+    current = _state(runs=10, wickets=MAX_PLAUSIBLE_WICKETS_PER_TRANSITION + 1, over_number=5, ball_in_over=1)
+    assert is_anomalous_transition(previous, current) is None
+
+
+def test_wickets_delta_exceeding_per_ball_rate_is_still_anomalous():
+    """Even across a multi-ball gap, more than one wicket per ball is
+    cricket-implausible and should still be rejected."""
+    previous = _state(runs=10, wickets=0, over_number=1, ball_in_over=1)
+    current = _state(runs=10, wickets=3, over_number=1, ball_in_over=3)  # 2 balls advanced, 3 wickets
+    reason = is_anomalous_transition(previous, current)
+    assert reason is not None and "wickets_delta" in reason
 
 
 def test_large_runs_jump_on_single_ball_advance_is_anomalous():

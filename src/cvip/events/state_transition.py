@@ -101,8 +101,18 @@ BALLS_PER_OVER = 6
 MAX_PLAUSIBLE_RUNS_PER_BALL = 11
 #: A hat-trick (3 wickets on 3 consecutive-ish balls) is the practical
 #: real-world ceiling for how many wickets one state transition should
-#: ever plausibly represent, even across a multi-ball OCR gap.
+#: ever plausibly represent when the ball advance isn't computable (see
+#: `_balls_advanced`) -- the same fallback role `MAX_PLAUSIBLE_RUNS_PER_BALL`
+#: plays for runs_delta below.
 MAX_PLAUSIBLE_WICKETS_PER_TRANSITION = 3
+#: At most one wicket can fall per delivery, so a state transition spanning
+#: an N-ball OCR gap should tolerate up to N wickets -- not the flat
+#: per-transition ceiling above, which would wrongly flag a legitimate
+#: multi-over gap (e.g. 100/1 at 10.0 -> 140/5 at 17.0) as anomalous and,
+#: because the Comparison Engine keeps comparing later states against the
+#: last *accepted* baseline, cascade into rejecting every subsequent state
+#: for the rest of the innings.
+MAX_PLAUSIBLE_WICKETS_PER_BALL = 1
 
 
 def _has_null_core(sample: CleanedScoreboardSample) -> bool:
@@ -197,24 +207,30 @@ def is_anomalous_transition(previous: ScoreState, current: ScoreState) -> Option
     docstring and this module's threshold constants for the full
     rationale; this is Event Detection's own second layer of defense, not
     a replacement for Scoreboard OCR's `_validate_reading()`."""
+    balls = _balls_advanced(previous, current)
+
     wickets_delta = current.wickets - previous.wickets
-    if wickets_delta > MAX_PLAUSIBLE_WICKETS_PER_TRANSITION:
+    if balls is not None and balls > 0:
+        wickets_ceiling = balls * MAX_PLAUSIBLE_WICKETS_PER_BALL
+    else:
+        # Ball advance not computable, or zero/negative (over/ball itself
+        # did not move forward) -- fall back to the flat hat-trick bound,
+        # since a wickets increase with no corresponding ball advance is
+        # itself already a second, independent red flag.
+        wickets_ceiling = MAX_PLAUSIBLE_WICKETS_PER_TRANSITION
+    if wickets_delta > wickets_ceiling:
         return (
-            f"wickets_delta={wickets_delta} exceeds plausible ceiling "
-            f"({MAX_PLAUSIBLE_WICKETS_PER_TRANSITION})"
+            f"wickets_delta={wickets_delta} over {balls if balls else 0} ball(s) "
+            f"exceeds plausible ceiling ({wickets_ceiling})"
         )
 
     runs_delta = current.runs - previous.runs
-    balls = _balls_advanced(previous, current)
     if balls is not None and balls > 0:
-        ceiling = balls * MAX_PLAUSIBLE_RUNS_PER_BALL
+        runs_ceiling = balls * MAX_PLAUSIBLE_RUNS_PER_BALL
     else:
-        # Ball advance not computable, or zero/negative (over/ball itself
-        # did not move forward) -- fall back to a single-ball bound, since
-        # a runs increase with no corresponding ball advance is itself
-        # already a second, independent red flag.
-        ceiling = MAX_PLAUSIBLE_RUNS_PER_BALL
-    if runs_delta > ceiling:
-        return f"runs_delta={runs_delta} over {balls if balls else 0} ball(s) exceeds plausible ceiling ({ceiling})"
+        # Same fallback rationale as wickets_ceiling above.
+        runs_ceiling = MAX_PLAUSIBLE_RUNS_PER_BALL
+    if runs_delta > runs_ceiling:
+        return f"runs_delta={runs_delta} over {balls if balls else 0} ball(s) exceeds plausible ceiling ({runs_ceiling})"
 
     return None

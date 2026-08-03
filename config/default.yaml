@@ -4,7 +4,81 @@ config_version: 1
 
 video:
   sample_fps: 1
-  scene_threshold: 27.0
+  # Post-implementation amendment (specs/003-scene-detection/research.md
+  # "Detector selection" note) -- full rationale below.
+  #
+  # WHY AdaptiveDetector, not ContentDetector: real-video validation (a
+  # 3h10m club match) found PySceneDetect's original ContentDetector -- one
+  # fixed cut-score threshold, applied uniformly across the whole video --
+  # could not be made to work at all. The video's own "how different do two
+  # consecutive frames look" scale varies enormously *within a single
+  # match*: max observed score ~5.7 during calm pre-match/toss footage vs.
+  # ~95-97 during active play (measured via three independent 3-minute
+  # samples: opening, mid-innings, late-innings). No single fixed number is
+  # simultaneously correct for both regimes -- a value low enough to catch
+  # real cuts during calm footage (e.g. 3.0) produced hundreds of spurious
+  # boundaries once play started; a value that behaved reasonably during
+  # play (e.g. 20.0) found essentially nothing during calm footage.
+  # AdaptiveDetector compares each frame against a small rolling window of
+  # its own immediate neighbors instead of one global constant, so it
+  # self-adjusts to whichever regime the footage is currently in --
+  # confirmed empirically: 0 boundaries on calm footage, a consistent,
+  # well-spaced count on active footage, using the SAME parameters for
+  # both, with no manual per-video retuning required.
+  #
+  # WHY the adaptive ratio stays at PySceneDetect's own published default
+  # (3.0, not exposed as a separate config key): it is a scale-invariant
+  # ratio ("how many times more different than this frame's own
+  # neighborhood"), not an absolute score -- real-video testing found no
+  # evidence it needs overriding, and changing it was not part of what
+  # made detection work here.
+  #
+  # WHY scene_threshold (AdaptiveDetector's min_content_val) is the only
+  # calibrated parameter: it's a noise floor, not the primary cut decision
+  # -- a frame must BOTH clear this floor AND exceed the adaptive ratio
+  # above to register as a cut. Its only job is stopping the ratio math
+  # from firing on near-zero fluctuations (e.g. a locally-static scene
+  # where even tiny noise looks like "3x the neighborhood average" in
+  # relative terms despite being visually meaningless in absolute terms).
+  #
+  # WHY 8.0: PySceneDetect's own library default (15.0) sat almost exactly
+  # at the 99th percentile of this video's own active-play score
+  # distribution -- filtering out all but the most extreme 1% of frames,
+  # which is why it under-detected (2 boundaries per 3-minute active
+  # sample). Testing 3.0/5.0/8.0 against two independent active-play
+  # samples found 8.0 the best match to a hand-verified "reasonable cut
+  # rate" (~7 and ~4 boundaries per 3-minute sample, close to
+  # manually-tuned ContentDetector(threshold=20.0)'s own result on the
+  # same samples) while remaining comfortably above the calm-footage max
+  # of ~5.7, so pre-match footage still correctly yields ~0 boundaries.
+  #
+  # EXPECTED SYMPTOMS if this needs revisiting on different footage: too
+  # LOW -- many boundaries clustered within a second or two of each other
+  # (compression noise/motion blur being mistaken for cuts, most visible
+  # during active play); too HIGH -- few or no boundaries even during
+  # clearly active footage (real cuts failing to clear the floor,
+  # reproducing the original ContentDetector failure this replaces).
+  #
+  # WHY this is expected to generalize better than a single global
+  # threshold: min_content_val only has to be "low enough not to miss real
+  # cuts, high enough to reject noise" -- a much coarser, more forgiving
+  # bar than "the one number that correctly separates every cut from every
+  # non-cut in the whole video," which is what the old ContentDetector
+  # threshold had to be and demonstrably could not be. Getting this floor
+  # somewhat wrong on a differently-shot broadcast degrades gracefully
+  # (moderately more or fewer boundaries), rather than catastrophically
+  # (zero, or hundreds) the way the old fixed-threshold design did.
+  #
+  # NOT YET DONE, DELIBERATELY: automatic per-video calibration of this
+  # value. Rejected for now, not as a permanent decision -- with only one
+  # real match video validated, there is no evidence a fixed default fails
+  # to generalize, and building calibration logic to solve a problem that
+  # hasn't been demonstrated would be premature complexity (this
+  # platform's own constitution favors the simplest solution that meets
+  # the bar). Revisit with real evidence once 2+ independent match videos
+  # (different broadcasters/tournaments/production styles) have been
+  # validated against this same value.
+  scene_threshold: 8.0
 
 ocr:
   engine: tesseract
@@ -20,21 +94,45 @@ ocr:
   min_confidence: 0.70
 
 replay:
-  confidence_threshold: 0.65
+  # Calibrated against real footage (First8Overs.mp4): with no logo template
+  # configured (the common case -- see logo_template_path below) and this
+  # broadcast's hard, non-ramping cuts into replay (Scene Detection's
+  # REPLAY_TRANSITION heuristic didn't fire), the original weights
+  # (logo=0.35, transition=0.15) left a max achievable combined confidence
+  # of 0.50-0.65 depending on scenario -- at or below the original
+  # threshold (0.65), making detection mathematically unreachable rather
+  # than merely insensitive. Rebalanced so logo/transition remain
+  # meaningful when actually available, without being able to single-
+  # handedly gate detection: scoreboard+motion+camera_angle alone (the
+  # three signals that work without a template or a ramping cut) now have
+  # a 0.65 ceiling, comfortably above the lowered threshold. A reasoned
+  # recalibration from two hand-verified samples, not exhaustively tuned --
+  # revisit if other footage shows it's still wrong.
+  confidence_threshold: 0.50
   min_segment_seconds: 3
   # Optional reference image for the replay-logo/bumper-graphic signal (specs/004-replay-detection/).
   # When unset, that one signal always scores 0.0 rather than blocking detection.
   logo_template_path: null
   signals:
-    replay_logo_weight: 0.35
-    scoreboard_absence_weight: 0.20
-    motion_profile_weight: 0.20
-    transition_weight: 0.15
-    camera_angle_weight: 0.10
+    replay_logo_weight: 0.15
+    scoreboard_absence_weight: 0.25
+    motion_profile_weight: 0.25
+    transition_weight: 0.20
+    camera_angle_weight: 0.15
 
 events:
-  pre_roll_seconds: 8
-  post_roll_seconds: 12
+  # Calibrated against real match footage (First8Overs.mp4, WICKET and SIX
+  # events cross-checked by hand): the on-screen scoreboard graphic does not
+  # update until the broadcast cuts back from its post-event replay, so the
+  # OCR-detected event timestamp lags the actual live delivery by ~15s.
+  # Bowler run-up consistently begins ~30-35s before the detected timestamp;
+  # the replay consistently finishes within ~0-10s after it. pre_roll is set
+  # generously above the observed run-up lag to make sure this holds for
+  # longer run-ups too; post_roll keeps a small margin above the observed
+  # replay-completion point. A reasoned calibration from two samples, not an
+  # exhaustively tuned value -- revisit if other footage shows it's wrong.
+  pre_roll_seconds: 35
+  post_roll_seconds: 15
   merge_gap_seconds: 3
   # TEAM_MILESTONE fires each time the batting team's runs total crosses a
   # multiple of this interval (specs/007-event-detection/spec.md FR-008).

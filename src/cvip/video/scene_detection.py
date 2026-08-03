@@ -10,7 +10,7 @@ from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
-from scenedetect.detectors import ContentDetector
+from scenedetect.detectors import AdaptiveDetector
 
 from cvip.common.diagnostics import DiagnosticsTracker, ExecutionDiagnostics, emit_diagnostics
 from cvip.video.frame_extraction import extract_frames
@@ -42,15 +42,21 @@ POST_CUT_WINDOW = 3
 RAMP_ELEVATED_FRACTION = 0.25
 RAMP_MIN_ELEVATED_FRAMES = 2
 
-# How many recent (frame_index -> timestamp) pairs to retain. SceneDetector's
-# general process_frame() contract permits a detector to report a cut frame
-# other than the one just passed in (e.g. a buffering detector reporting a
-# fade's start once its end is seen) -- ContentDetector itself never does
-# this in practice (verified against its implementation: it always returns
-# either [] or exactly [frame_num]), but this buffer is kept as a defensive
-# safety net against that general contract rather than relying on knowledge
-# of one specific detector's internals.
-RECENT_TIMESTAMP_BUFFER_SIZE = 32
+# How many recent (frame_index -> (timestamp, diff_score)) entries to
+# retain. SceneDetector's general process_frame() contract permits a
+# detector to report a cut frame other than the one just passed in --
+# AdaptiveDetector genuinely does this (verified against its implementation):
+# it holds a small rolling buffer (2 * window_width + 1 frames, 5 by
+# default) and reports a cut for a frame already `window_width` calls in
+# the past, once enough trailing context exists to compute that frame's
+# local-neighborhood average. This buffer lets a delayed cut report be
+# resolved against the score/timestamp that frame actually had (rather than
+# the current frame's), and lets the frames in between be recovered as
+# post-cut evidence instead of silently skipped. 32 is a generous multiple
+# of AdaptiveDetector's own default 5-frame buffer, kept as a defensive
+# margin rather than hard-coding knowledge of one specific detector's exact
+# buffer size here too.
+RECENT_FRAME_BUFFER_SIZE = 32
 
 _ExtractionFailureToSceneDetectionFailure = {
     ExtractionFailureReason.SOURCE_UNAVAILABLE_MID_RUN: SceneDetectionFailureReason.SOURCE_UNAVAILABLE_MID_RUN,
@@ -117,8 +123,29 @@ class SceneDetector:
             )
 
         source = load_result.source
-        content_detector = ContentDetector(
-            threshold=self._request.scene_threshold,
+        content_detector = AdaptiveDetector(
+            # Post-implementation amendment (specs/003-scene-detection/
+            # research.md "Detector selection" note): PySceneDetect's
+            # ContentDetector -- a single fixed cut-score threshold applied
+            # video-wide -- could not generalize across a single real match
+            # recording, let alone across different broadcasts/tournaments.
+            # Real-video validation found the video's own "how different do
+            # two frames look" scale varies enormously within one match
+            # (max observed score ~5.7 during calm pre-match footage vs.
+            # ~95-97 during active play) -- no single fixed number is
+            # simultaneously right for both. AdaptiveDetector compares each
+            # frame against a small rolling window of its own immediate
+            # neighbors instead of one global constant, so it self-adjusts
+            # to whichever regime the footage is currently in.
+            # `adaptive_threshold` (the ratio a frame's score must exceed
+            # relative to its neighborhood -- "how many times more
+            # different than usual") is left at PySceneDetect's own
+            # published default (3.0), since it is inherently scale-
+            # invariant and not something real-video testing found reason
+            # to override. `min_content_val` (see its own field
+            # documentation on `SceneDetectionRequest.scene_threshold`) is
+            # the one parameter this platform calibrates.
+            min_content_val=self._request.scene_threshold,
             # PySceneDetect's own default (min_scene_len=15) silently drops
             # any cut within 15 frames of the previous one -- not part of
             # this feature's contract, and would violate FR-006 for two
@@ -133,7 +160,17 @@ class SceneDetector:
         pending: List[Dict[str, Any]] = []
         raw_boundaries: List[Tuple[float, BoundaryType, float]] = []
         last_frame = None
-        recent_timestamps: "OrderedDict[int, float]" = OrderedDict()
+        # frame_index -> (timestamp, diff_score), see RECENT_FRAME_BUFFER_SIZE.
+        recent_frames: "OrderedDict[int, Tuple[float, float]]" = OrderedDict()
+        # The frame index through which the most recently created boundary's
+        # post-cut evidence window extends (its own cut_frame_num +
+        # POST_CUT_WINDOW). Used to decide whether a later cut report belongs
+        # to that same boundary -- checked by frame proximity to the true cut
+        # frame, not merely "is a boundary still in `pending` right now": with
+        # backfilled evidence (see below), a boundary can finish classifying
+        # and leave `pending` before a sibling report for the same multi-frame
+        # transition effect arrives.
+        last_boundary_end_frame: Optional[int] = None
 
         try:
             extraction_request = ExtractionRequest(load_result=load_result, mode=SamplingMode.FULL)
@@ -144,9 +181,9 @@ class SceneDetector:
                     self._frames_analyzed += 1
                     score = self._frame_diff_score(last_frame, frame_context.frame)
 
-                    recent_timestamps[frame_context.frame_index] = frame_context.timestamp_seconds
-                    if len(recent_timestamps) > RECENT_TIMESTAMP_BUFFER_SIZE:
-                        recent_timestamps.popitem(last=False)
+                    recent_frames[frame_context.frame_index] = (frame_context.timestamp_seconds, score)
+                    if len(recent_frames) > RECENT_FRAME_BUFFER_SIZE:
+                        recent_frames.popitem(last=False)
 
                     # Feed this frame's score to boundaries pending from
                     # earlier frames (before adding any new pending boundary
@@ -162,35 +199,48 @@ class SceneDetector:
                     pending = still_pending
 
                     # process_frame()'s general contract permits it to report
-                    # a cut frame other than the current one (a buffering
-                    # detector) and more than one at once -- look each one up
-                    # by its own frame index rather than assuming it's always
-                    # frame_context's own (research.md Decision 1 notes this
-                    # doesn't happen for ContentDetector specifically, but
-                    # this loop doesn't rely on that).
+                    # a cut frame other than the current one -- AdaptiveDetector
+                    # genuinely does this (RECENT_FRAME_BUFFER_SIZE above):
+                    # cut_frame_num can be `window_width` frames behind
+                    # frame_context.frame_index. Resolve that frame's own
+                    # timestamp and diff score from recent_frames rather than
+                    # the current frame's, and backfill the intervening frames
+                    # (already processed above, before this pending boundary
+                    # existed to receive them) as post-cut evidence. Without
+                    # this, a replay-style transition's elevated diffs in
+                    # those skipped frames would never be seen, and it would
+                    # be misclassified as a low-confidence ordinary cut.
                     cut_frame_numbers = content_detector.process_frame(
                         frame_context.frame_index, frame_context.frame
                     )
                     for cut_frame_num in cut_frame_numbers:
-                        if pending:
-                            # A cut detected while an earlier one's post-cut
-                            # window is still open is treated as part of the
-                            # same transition (e.g. a multi-frame wipe/
-                            # flicker), not a separate boundary -- avoiding a
-                            # burst of near-duplicate boundaries for one
-                            # visual effect. A cut occurring after the window
-                            # has already closed (POST_CUT_WINDOW frames
-                            # later) still starts its own new pending
-                            # boundary.
+                        if last_boundary_end_frame is not None and cut_frame_num <= last_boundary_end_frame:
+                            # This report's true cut frame falls within the
+                            # most recent boundary's own post-cut evidence
+                            # window -- part of the same transition (e.g. a
+                            # multi-frame wipe/flicker reported as several
+                            # nearby cut points), not a separate boundary.
+                            # avoiding a burst of near-duplicate boundaries
+                            # for one visual effect.
                             continue
-                        cut_timestamp = recent_timestamps.get(cut_frame_num, frame_context.timestamp_seconds)
-                        pending.append(
-                            {
-                                "timestamp": cut_timestamp,
-                                "cut_score": score,
-                                "post_scores": [],
-                            }
+                        cut_timestamp, cut_score = recent_frames.get(
+                            cut_frame_num, (frame_context.timestamp_seconds, score)
                         )
+                        backfill_scores = [
+                            frame_score
+                            for frame_index, (_, frame_score) in recent_frames.items()
+                            if cut_frame_num < frame_index <= frame_context.frame_index
+                        ][:POST_CUT_WINDOW]
+                        new_boundary = {
+                            "timestamp": cut_timestamp,
+                            "cut_score": cut_score,
+                            "post_scores": backfill_scores,
+                        }
+                        last_boundary_end_frame = cut_frame_num + POST_CUT_WINDOW
+                        if len(backfill_scores) >= POST_CUT_WINDOW:
+                            raw_boundaries.append(self._classify(new_boundary))
+                        else:
+                            pending.append(new_boundary)
 
                     # Frame data is only guaranteed valid through the
                     # current iteration step (frame_extraction_models.py's

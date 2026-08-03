@@ -704,6 +704,8 @@ For a 3-hour match
 - AI-generated Match Summary
 - AI-generated Commentary
 - Automatic Social Media Reel Generation
+- **YouTube video ingestion as an input source** -- raised during `specs/011-club-broadcast-overlay-support/`'s testing phase; no download tooling (`yt-dlp`/`youtube-dl`) is currently installed, and using it raises a rights/ToS question (only appropriate for the uploader's own content, downloaded through official means) that needs a deliberate answer before this is scoped, not just a tooling addition. Offline-first (constitution Principle I) is unaffected either way -- this would be a one-time local download step prior to analysis, not a runtime network dependency.
+- **Structured Match Metadata Validation layer** -- an optional post-hoc stage that aligns Event Detection's output against official ball-by-ball metadata (CricHeroes JSON initially, CricSheet/CSV as future providers) to report detection accuracy and recover missed clips. Full architecture proposed and reviewed (`MatchMetadataProvider` interface, normalized event model, alignment/recovery/confidence-fusion design) during `specs/011-club-broadcast-overlay-support/`'s real-video validation pass; not yet formalized as its own spec (next available number: `012-structured-metadata-validation`). Explicitly optional and decoupled from the core video pipeline by design -- `cvip analyze` behaves identically with or without it.
 
 ---
 

@@ -31,6 +31,19 @@ class SceneDetectionRequest:
     """
 
     load_result: LoadResult
+    # Post-implementation amendment (specs/003-scene-detection/research.md
+    # "Detector selection" note): this field's meaning changed when the
+    # underlying algorithm moved from PySceneDetect's ContentDetector (a
+    # single fixed cut-score threshold) to AdaptiveDetector (a rolling,
+    # self-normalizing comparison against each frame's own neighborhood).
+    # `scene_threshold` is now AdaptiveDetector's `min_content_val` -- a
+    # noise floor a frame's own content-difference score must clear before
+    # it's even considered as a candidate cut, not the primary cut decision
+    # (that's AdaptiveDetector's `adaptive_threshold`, a scale-invariant
+    # ratio left at PySceneDetect's own published default and not exposed
+    # here, since real-video testing found no reason to override it).
+    # Default: 8.0 (config/default.yaml's `video.scene_threshold`) --
+    # see that file's own comment for the full calibration rationale.
     scene_threshold: float
 
     def __post_init__(self) -> None:

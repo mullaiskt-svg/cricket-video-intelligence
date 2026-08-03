@@ -81,15 +81,31 @@ def test_cut_near_end_of_stream_is_still_flushed_and_classified(mocker):
     """A cut whose post-cut window can't fully fill (fewer than
     POST_CUT_WINDOW frames remain before the stream ends) must still be
     finalized -- flushed with whatever partial evidence is available,
-    rather than silently dropped."""
-    frames = _three_segment_frame_contexts(segment_frames=40)
-    # Truncate right after the second cut (around frame 80), leaving fewer
-    # than POST_CUT_WINDOW=3 frames for its post-cut window.
-    frames = frames[:82]
+    rather than silently dropped. Uses a mocked detector (rather than the
+    real AdaptiveDetector) so this stays deterministic regardless of the
+    real detector's own internal reporting lag: reports a cut one frame
+    before the stream ends, leaving only 1 backfillable post-cut frame --
+    short of POST_CUT_WINDOW=3 -- so the boundary is still in `pending`
+    when the stream ends and must go through _finalize_boundaries's flush."""
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / 25.0, frame=_solid_frame(0))
+        for i in range(10)
+    ]
     mocker.patch(
         "cvip.video.scene_detection.extract_frames",
         return_value=_FakeFrameExtractor(frames),
     )
+
+    mock_detector_instance = mocker.MagicMock()
+
+    def fake_process_frame(frame_num, frame_img):
+        # Report a cut for frame 8 only once the stream reaches its last
+        # frame (9) -- only frame 9 itself is available as post-cut
+        # evidence, one short of POST_CUT_WINDOW.
+        return [8] if frame_num == 9 else []
+
+    mock_detector_instance.process_frame.side_effect = fake_process_frame
+    mocker.patch("cvip.video.scene_detection.AdaptiveDetector", return_value=mock_detector_instance)
 
     load_result = _load("valid_short.mp4")
     request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
@@ -97,9 +113,77 @@ def test_cut_near_end_of_stream_is_still_flushed_and_classified(mocker):
     with detect_scenes(request) as detector:
         result = detector.run()
 
-    assert len(result.boundaries) >= 2
-    for boundary in result.boundaries:
-        assert boundary.confidence is not None
+    assert len(result.boundaries) == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(8 / 25.0)
+    assert result.boundaries[0].confidence is not None
+
+
+def test_cut_reported_with_no_lag_needs_full_post_cut_window(mocker):
+    """When a detector reports a cut for the current frame itself (no
+    buffering lag -- e.g. right at stream start, before any lag-inducing
+    trailing context exists), backfill yields zero prior post-cut frames.
+    The boundary must then genuinely wait for POST_CUT_WINDOW frames fed
+    one at a time (the `still_pending` path), not be classified early."""
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / 25.0, frame=_solid_frame(0))
+        for i in range(10)
+    ]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frames),
+    )
+
+    mock_detector_instance = mocker.MagicMock()
+
+    def fake_process_frame(frame_num, frame_img):
+        # Report a cut for the very frame just processed -- zero lag.
+        return [3] if frame_num == 3 else []
+
+    mock_detector_instance.process_frame.side_effect = fake_process_frame
+    mocker.patch("cvip.video.scene_detection.AdaptiveDetector", return_value=mock_detector_instance)
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with detect_scenes(request) as detector:
+        result = detector.run()
+
+    assert len(result.boundaries) == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(3 / 25.0)
+
+
+def test_cut_reported_with_large_lag_classifies_immediately_from_backfill(mocker):
+    """When a detector's reporting lag is large enough that the backfilled
+    post-cut frames already meet POST_CUT_WINDOW on their own, the boundary
+    must be classified immediately rather than added to `pending` to wait
+    for feeds that would push it past the intended window size."""
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / 25.0, frame=_solid_frame(0))
+        for i in range(10)
+    ]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frames),
+    )
+
+    mock_detector_instance = mocker.MagicMock()
+
+    def fake_process_frame(frame_num, frame_img):
+        # Report a cut for frame 5 only once frame 9 is reached -- 4 frames
+        # of lag, already exceeding POST_CUT_WINDOW=3 worth of backfill.
+        return [5] if frame_num == 9 else []
+
+    mock_detector_instance.process_frame.side_effect = fake_process_frame
+    mocker.patch("cvip.video.scene_detection.AdaptiveDetector", return_value=mock_detector_instance)
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with detect_scenes(request) as detector:
+        result = detector.run()
+
+    assert len(result.boundaries) == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(5 / 25.0)
 
 
 def test_cut_frame_number_other_than_current_uses_correct_timestamp(mocker):
@@ -124,7 +208,7 @@ def test_cut_frame_number_other_than_current_uses_correct_timestamp(mocker):
         return [3] if frame_num == 5 else []
 
     mock_detector_instance.process_frame.side_effect = fake_process_frame
-    mocker.patch("cvip.video.scene_detection.ContentDetector", return_value=mock_detector_instance)
+    mocker.patch("cvip.video.scene_detection.AdaptiveDetector", return_value=mock_detector_instance)
 
     load_result = _load("valid_short.mp4")
     request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
@@ -152,6 +236,36 @@ def test_boundary_ids_are_unique_within_a_result(mocker):
     assert len(result.boundaries) >= 2
     boundary_ids = [b.boundary_id for b in result.boundaries]
     assert len(boundary_ids) == len(set(boundary_ids))
+
+
+def test_second_cut_detected_while_first_is_still_pending_merges_into_it(mocker):
+    """Post-implementation amendment (AdaptiveDetector): a cut is reported
+    `window_width` frames after it actually occurs (buffered), so two
+    genuinely close-together cuts can both be *reported* within this
+    module's own POST_CUT_WINDOW of each other -- verified empirically
+    (steady 0 x10, jump to 255, one steady frame, jump back to 0, steady 0):
+    AdaptiveDetector reports cuts at frames 10 and 12, only 2 frames apart,
+    which must merge into a single boundary (the `if pending: continue`
+    path) rather than producing two."""
+    fps = 25.0
+    values = [0] * 10 + [255, 255, 0] + [0] * 10
+    frames = [
+        FrameContext(source_video_id="deadbeef", frame_index=i, timestamp_seconds=i / fps, frame=_solid_frame(v))
+        for i, v in enumerate(values)
+    ]
+    mocker.patch(
+        "cvip.video.scene_detection.extract_frames",
+        return_value=_FakeFrameExtractor(frames),
+    )
+
+    load_result = _load("valid_short.mp4")
+    request = SceneDetectionRequest(load_result=load_result, scene_threshold=27.0)
+
+    with detect_scenes(request) as detector:
+        result = detector.run()
+
+    assert result.total_boundaries == 1
+    assert result.boundaries[0].timestamp_seconds == pytest.approx(10 / fps)
 
 
 def test_frames_sourced_exclusively_via_extract_frames_not_cv2_directly(mocker):

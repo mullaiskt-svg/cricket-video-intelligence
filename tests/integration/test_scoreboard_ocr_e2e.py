@@ -13,8 +13,9 @@ from cvip.video.frame_extraction_models import FrameContext
 from cvip.video.loader import load_video
 from cvip.video.models import ContainerFormat, LoadResult, MatchVideoSource
 from cvip.video.scoreboard_ocr import extract_scoreboard
+from cvip.video.scoreboard_parsers import ClubBroadcastParser
 from cvip.video.scoreboard_ocr_errors import ScoreboardOcrError, ScoreboardOcrFailureReason
-from cvip.video.scoreboard_ocr_models import ScoreboardOcrRequest
+from cvip.video.scoreboard_ocr_models import ScoreboardOcrRequest, ScoreboardOcrResult, ScoreboardSample
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "video_loader"
 
@@ -384,3 +385,118 @@ def test_cancel_mid_extraction_stops_cleanly_and_emits_once(mocker):
 
     assert len(result.samples) == 6  # frames 0-5 processed before the break
     assert emit_spy.call_count == 1
+
+
+# =============================================================================
+# specs/011-club-broadcast-overlay-support/ analysis finding E1 (T034):
+# SC-005's mandatory, non-optional proof -- a deterministic timeline built
+# directly from ClubBroadcastParser output, fed into Event Detection, with
+# no real video/OCR/fixture involved. The genuinely optional real-recording
+# check (T036) is additive to this, not a substitute for it.
+# =============================================================================
+
+
+def _club_broadcast_tokens(batter_stats, non_striker_stats, score, bowler_stats):
+    """Builds a club-broadcast-format token list matching this feature's own
+    raw evidence shape (research.md), with the given per-reading stats/score
+    tokens substituted in."""
+    return [
+        ("MAHESH", 90.0),
+        *batter_stats,
+        ("SAI", 88.0),
+        ("KRISHNA", 87.0),
+        *non_striker_stats,
+        ("Chai", 70.0),
+        ("Cricket", 70.0),
+        ("Club", 70.0),
+        (score, 92.0),
+        ("BHARATH", 89.0),
+        *bowler_stats,
+    ]
+
+
+def test_synthetic_club_broadcast_timeline_produces_four_and_wicket_events_via_event_detection():
+    """SC-005: Event Detection (Module 5), run unmodified against a cleaned
+    timeline derived from ClubBroadcastParser's parsing path, successfully
+    detects FOUR/SIX/WICKET events -- proven synthetically, without a real
+    video, so this success criterion is never gated on the optional
+    real-fixture check alone (analysis finding E1)."""
+    from cvip.events.detection import detect_events
+    from cvip.events.models import EventDetectionRequest
+    from cvip.video.ocr_timeline_smoother_models import CleanedScoreboardSample, OCRTimelineSmootherResult
+    from cvip.video.replay_detection_models import ReplayDetectionResult
+
+    club_parser = ClubBroadcastParser()
+
+    # Three consecutive club-broadcast readings: a dot ball, then a FOUR
+    # (runs +4, ball_in_over advances by exactly one), then a WICKET (a
+    # wicket falls on the next ball).
+    readings_tokens = [
+        _club_broadcast_tokens([("0", 85.0), ("(0)", 80.0)], [("0(0)", 84.0)], "0-0/0.0(20)", [("0-0(0)", 83.0)]),
+        _club_broadcast_tokens([("4", 85.0), ("(1)", 80.0)], [("0(1)", 84.0)], "4-0/0.1(20)", [("0-0(0)", 83.0)]),
+        _club_broadcast_tokens([("4", 85.0), ("(2)", 80.0)], [("0(2)", 84.0)], "4-1/0.2(20)", [("0-1(0)", 83.0)]),
+    ]
+
+    cleaned_samples = []
+    raw_samples = []
+    for i, tokens in enumerate(readings_tokens):
+        # Real parser output, not hand-fabricated values (task requirement).
+        parsed, _ = club_parser.parse(tokens)
+        timestamp = float(i)
+        cleaned_samples.append(
+            CleanedScoreboardSample(
+                timestamp_seconds=timestamp,
+                runs=parsed["runs"],
+                wickets=parsed["wickets"],
+                over_number=parsed["over_number"],
+                ball_in_over=parsed["ball_in_over"],
+                batter=parsed.get("batter"),
+                non_striker=parsed.get("non_striker"),
+                bowler=parsed.get("bowler"),
+                run_rate=None,
+            )
+        )
+        raw_samples.append(
+            ScoreboardSample(
+                timestamp_seconds=timestamp,
+                runs=parsed["runs"],
+                wickets=parsed["wickets"],
+                over_number=parsed["over_number"],
+                ball_in_over=parsed["ball_in_over"],
+                batter=parsed.get("batter"),
+                non_striker=parsed.get("non_striker"),
+                bowler=parsed.get("bowler"),
+                run_rate=None,
+                raw_text="",
+                ocr_confidence=1.0,
+                parse_confidence=1.0,  # batter is populated (best-effort) -> validation passes
+            )
+        )
+
+    source_video_id = "club-broadcast-synthetic"
+    request = EventDetectionRequest(
+        cleaned_timeline=OCRTimelineSmootherResult(
+            source_video_id=source_video_id, samples=tuple(cleaned_samples), total_samples=len(cleaned_samples)
+        ),
+        raw_ocr_result=ScoreboardOcrResult(
+            source_video_id=source_video_id, samples=tuple(raw_samples), total_samples=len(raw_samples)
+        ),
+        replay_result=ReplayDetectionResult(source_video_id=source_video_id, segments=(), total_segments=0),
+        team_milestone_interval=50,
+        ranking={"FOUR": 60, "SIX": 80, "WICKET": 95, "TEAM_MILESTONE": 65},
+    )
+
+    with detect_events(request) as runner:
+        result = runner.run()
+
+    event_types = [event.event_type for event in result.events]
+    assert "FOUR" in event_types
+    assert "WICKET" in event_types
+
+    four_event = next(event for event in result.events if event.event_type == "FOUR")
+    wicket_event = next(event for event in result.events if event.event_type == "WICKET")
+    # WICKET's player attribution comes from the best-effort batter
+    # ClubBroadcastParser populated -- proving the amendment's output is
+    # genuinely usable downstream, not just structurally present.
+    assert wicket_event.player == "MAHESH"
+    assert four_event.confidence > 0.0

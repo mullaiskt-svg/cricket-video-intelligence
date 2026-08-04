@@ -1,3 +1,1 @@
-{
-  "feature_directory": "specs/010-event-database"
-}
+{"feature_directory":"specs\\012-pipeline-orchestrator-cli"}

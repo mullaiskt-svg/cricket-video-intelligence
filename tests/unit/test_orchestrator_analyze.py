@@ -407,6 +407,40 @@ def test_event_detection_failure_maps_to_general_failure(mocker, tmp_path):
     assert exc_info.value.reason == OrchestratorFailureReason.GENERAL_FAILURE
 
 
+def test_default_output_db_path_creates_missing_parent_directory(mocker, tmp_path, monkeypatch):
+    """PR #15 review finding: the default data/matches/ subdirectory does
+    not exist on a fresh checkout -- analyze() must create it itself
+    before opening the database there, or the very first default-path run
+    fails at SQLite's own file-open step."""
+    _patch_all_stages(mocker)
+    monkeypatch.chdir(tmp_path)
+
+    request = AnalyzeRequest(video_path="match.mp4", config=_CONFIG)  # no output_db_path -> default resolution
+
+    run = orchestrator.analyze(request)
+
+    assert run.status == "COMPLETE"
+    assert (tmp_path / "data" / "matches" / "abc123.sqlite").exists()
+
+
+def test_database_error_during_status_check_maps_to_database_failure(mocker, tmp_path):
+    from cvip.db.errors import EventDatabaseError, EventDatabaseFailureReason
+
+    mocker.patch("cvip.orchestrator.load_video", return_value=_success_load_result())
+    mocker.patch(
+        "cvip.db.database.EventDatabase.check_analysis_status",
+        side_effect=EventDatabaseError(EventDatabaseFailureReason.CORRUPTED_DATABASE_FILE, "disk error"),
+    )
+    scene_mock = mocker.patch("cvip.orchestrator.detect_scenes")
+
+    request = AnalyzeRequest(video_path="match.mp4", config=_CONFIG, output_db_path=str(tmp_path / "match.sqlite"))
+    with pytest.raises(OrchestratorError) as exc_info:
+        orchestrator.analyze(request)
+
+    assert exc_info.value.reason == OrchestratorFailureReason.DATABASE_FAILURE
+    scene_mock.assert_not_called()
+
+
 def test_tag_readings_with_innings_increments_on_genuine_transition():
     from cvip.orchestrator import _tag_readings_with_innings
 

@@ -176,64 +176,85 @@ def analyze(request: AnalyzeRequest) -> AnalysisRun:
 
     db_path = request.output_db_path or f"data/matches/{source.file_hash[:12]}.sqlite"
     match_id = Path(db_path).stem
+    # PR #15 review finding: neither this module nor open_database() creates
+    # the resolved path's parent directory -- on a fresh checkout, the
+    # default `data/matches/` subdirectory doesn't exist yet (only
+    # `data/.gitkeep` is checked in), so the first-ever default-path analyze
+    # run would otherwise fail at SQLite open with "unable to open database
+    # file" before any real work even starts.
+    os.makedirs(Path(db_path).parent, exist_ok=True)
 
-    with open_database(Path(db_path)) as db:
-        status = db.check_analysis_status(source.file_hash)
-        if status in (AnalysisStatusCondition.COMPLETE, AnalysisStatusCondition.IN_PROGRESS):
-            if not request.force:
-                raise OrchestratorError(
-                    OrchestratorFailureReason.ALREADY_ANALYZED,
-                    f"file_hash={source.file_hash} already has status {status.value}; pass --force to reanalyze",
+    try:
+        with open_database(Path(db_path)) as db:
+            status = db.check_analysis_status(source.file_hash)
+            if status in (AnalysisStatusCondition.COMPLETE, AnalysisStatusCondition.IN_PROGRESS):
+                if not request.force:
+                    raise OrchestratorError(
+                        OrchestratorFailureReason.ALREADY_ANALYZED,
+                        f"file_hash={source.file_hash} already has status {status.value}; pass --force to reanalyze",
+                    )
+                db.reset_for_forced_reanalysis(source.file_hash)
+
+            _require_native_dependencies()
+
+            db.begin_analysis(
+                MatchMetadata(
+                    file_hash=source.file_hash,
+                    source_video_path=request.video_path,
+                    duration_seconds=source.duration_seconds,
+                    resolution_width=source.resolution[0],
+                    resolution_height=source.resolution[1],
+                    frame_rate=source.frame_rate,
+                    codec=source.codec,
                 )
-            db.reset_for_forced_reanalysis(source.file_hash)
-
-        _require_native_dependencies()
-
-        db.begin_analysis(
-            MatchMetadata(
-                file_hash=source.file_hash,
-                source_video_path=request.video_path,
-                duration_seconds=source.duration_seconds,
-                resolution_width=source.resolution[0],
-                resolution_height=source.resolution[1],
-                frame_rate=source.frame_rate,
-                codec=source.codec,
             )
-        )
 
-        try:
-            scene_result = _run_scene_detection(load_result, request.config)
-            replay_result = _run_replay_detection(load_result, scene_result, request.config)
-            db.persist_replays(replay_result.segments)
+            try:
+                scene_result = _run_scene_detection(load_result, request.config)
+                replay_result = _run_replay_detection(load_result, scene_result, request.config)
+                db.persist_replays(replay_result.segments)
 
-            ocr_result = _run_scoreboard_ocr(load_result, request.config)
-            tagged_readings = _tag_readings_with_innings(ocr_result.samples)
-            db.persist_scoreboard_readings(tagged_readings)
+                ocr_result = _run_scoreboard_ocr(load_result, request.config)
+                tagged_readings = _tag_readings_with_innings(ocr_result.samples)
+                db.persist_scoreboard_readings(tagged_readings)
 
-            cleaned_timeline = _run_ocr_timeline_smoother(ocr_result)
+                cleaned_timeline = _run_ocr_timeline_smoother(ocr_result)
 
-            event_result = _run_event_detection(cleaned_timeline, ocr_result, replay_result, request.config)
-            db.persist_events(event_result.events)
-        except OrchestratorError:
-            db.fail_analysis()
-            raise
-        except EventDatabaseError as exc:
-            # A persist_*() call itself failed (e.g. a corrupted file
-            # detected mid-run) -- must still translate to this feature's
-            # own DATABASE_FAILURE exit code, not leak the raw
-            # EventDatabaseError past cli.py's `except OrchestratorError`
-            # handler (which would otherwise crash unhandled instead of
-            # exiting cleanly with code 7).
-            db.fail_analysis()
-            raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
-        except Exception:
-            db.fail_analysis()
-            raise
+                event_result = _run_event_detection(cleaned_timeline, ocr_result, replay_result, request.config)
+                db.persist_events(event_result.events)
+            except OrchestratorError:
+                db.fail_analysis()
+                raise
+            except EventDatabaseError as exc:
+                # A persist_*() call itself failed (e.g. a corrupted file
+                # detected mid-run) -- must still translate to this feature's
+                # own DATABASE_FAILURE exit code, not leak the raw
+                # EventDatabaseError past cli.py's `except OrchestratorError`
+                # handler (which would otherwise crash unhandled instead of
+                # exiting cleanly with code 7).
+                db.fail_analysis()
+                raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
+            except Exception:
+                db.fail_analysis()
+                raise
 
-        db.complete_analysis()
+            db.complete_analysis()
 
-        if request.timeline_path:
-            _write_timeline_json(db.get_match_timeline(), request.timeline_path)
+            if request.timeline_path:
+                _write_timeline_json(db.get_match_timeline(), request.timeline_path)
+    except EventDatabaseError as exc:
+        # PR #15 review finding: open_database()'s own __enter__ (corruption/
+        # schema-mismatch checks) and check_analysis_status()/
+        # reset_for_forced_reanalysis()/begin_analysis() all run *before*
+        # the inner try block above -- a failure there was previously
+        # leaking out as a raw EventDatabaseError, past cli.py's own
+        # `except OrchestratorError` handler, falling back to the generic
+        # exit code 1 instead of the correct database-failure exit code 7.
+        # No db.fail_analysis() call here: by construction, every one of
+        # these calls either runs before an IN_PROGRESS record could exist
+        # yet, or *is* the reason that record's state can't be established
+        # cleanly -- there is nothing well-defined to mark FAILED.
+        raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
 
     logger.info(f"analyze: COMPLETE (match_id={match_id}, event_count={len(event_result.events)})")
     return AnalysisRun(
@@ -392,12 +413,19 @@ def generate(request: GenerateRequest) -> GenerateResult:
     try:
         with open_database(Path(request.db_path)) as db:
             queried_events = db.query_events(query_filter)
+            # PR #15 review finding: request.match_id (e.g. "match_001") is a
+            # database identifier, not the real video file path -- passing it
+            # straight through as source_video_path made stitch_video()'s own
+            # os.path.isfile() check fail for any non-empty plan. The real
+            # path was already persisted during analyze()'s begin_analysis()
+            # call; read it back from the same open connection.
+            source_video_path = db.get_match_summary().source_video_path
     except EventDatabaseError as exc:
         raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
 
     clip_request = ClipGenerationRequest(
         events=queried_events,
-        source_video_path=request.match_id,
+        source_video_path=source_video_path,
         video_duration_seconds=_max_timestamp(queried_events),
         pre_roll_seconds=request.pre_roll_seconds,
         post_roll_seconds=request.post_roll_seconds,
@@ -409,6 +437,15 @@ def generate(request: GenerateRequest) -> GenerateResult:
             plan = runner.run()
     except ClipGenerationError as exc:
         raise OrchestratorError(OrchestratorFailureReason.GENERAL_FAILURE, exc.detail) from exc
+
+    if plan.total_clips == 0:
+        # PR #15 review finding: Video Stitcher's own validation rejects an
+        # empty ClipPlan as EMPTY_CLIP_PLAN, which would otherwise turn a
+        # valid "zero matching events" outcome (Edge Cases: an empty filter
+        # result, or every matching event replay-excluded) into a spurious
+        # EXPORT_FAILURE. Short-circuit before ever constructing a
+        # StitchRequest -- nothing to stitch is not a failure.
+        return GenerateResult(output_path=request.output_path, clip_count=0, event_count=len(queried_events))
 
     stitch_request = StitchRequest(clip_plan=plan, output_path=request.output_path)
     try:

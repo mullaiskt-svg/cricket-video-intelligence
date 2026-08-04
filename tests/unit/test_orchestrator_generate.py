@@ -86,6 +86,58 @@ def test_template_match_queries_and_sequences_clip_generator_and_stitcher(mocker
     assert clip_request.events[0].event_type == "FOUR"
 
 
+def test_clip_request_uses_real_source_video_path_not_match_id(mocker, tmp_path):
+    """PR #15 review finding: request.match_id (e.g. "match_001") is a
+    database identifier, not a real file path -- generate() must read the
+    actual source_video_path back from the persisted match metadata."""
+    db_path = tmp_path / "match_001.sqlite"
+    with open_database(db_path) as db:
+        db.begin_analysis(
+            MatchMetadata(file_hash="abc123", source_video_path="C:/videos/real_match.mp4")
+        )
+        db.persist_events([_Event()])
+        db.complete_analysis()
+
+    plan = _make_clip_plan()
+    clip_ctx = mocker.MagicMock()
+    clip_ctx.__enter__.return_value.run.return_value = plan
+    generate_clips_mock = mocker.patch("cvip.orchestrator.generate_clips", return_value=clip_ctx)
+    stitch_ctx = mocker.MagicMock()
+    stitch_ctx.__enter__.return_value.run.return_value = StitchResult(output_path="out.mp4", total_duration_seconds=20.0, clip_count=1)
+    mocker.patch("cvip.orchestrator.stitch_video", return_value=stitch_ctx)
+
+    request = GenerateRequest(match_id="match_001", db_path=str(db_path), template="match", output_path="out.mp4")
+    orchestrator.generate(request)
+
+    clip_request = generate_clips_mock.call_args[0][0]
+    assert clip_request.source_video_path == "C:/videos/real_match.mp4"
+
+
+def test_empty_clip_plan_short_circuits_before_stitching(mocker, tmp_path):
+    """PR #15 review finding: Video Stitcher rejects an empty ClipPlan as
+    EMPTY_CLIP_PLAN -- a filter matching zero events (or every match
+    replay-excluded) must return a valid zero-result GenerateResult
+    instead of a spurious export failure."""
+    from cvip.clips.models import ClipPlan
+
+    db_path = tmp_path / "match_001.sqlite"
+    _seed_db(db_path, events=[])  # nothing persisted -> query_events() returns ()
+
+    empty_plan = ClipPlan(source_video_path="match.mp4", clips=(), total_clips=0)
+    clip_ctx = mocker.MagicMock()
+    clip_ctx.__enter__.return_value.run.return_value = empty_plan
+    mocker.patch("cvip.orchestrator.generate_clips", return_value=clip_ctx)
+    stitch_mock = mocker.patch("cvip.orchestrator.stitch_video")
+
+    request = GenerateRequest(match_id="match_001", db_path=str(db_path), template="match", output_path="out.mp4")
+    result = orchestrator.generate(request)
+
+    assert result.clip_count == 0
+    assert result.event_count == 0
+    assert result.output_path == "out.mp4"
+    stitch_mock.assert_not_called()
+
+
 def test_filters_translate_into_event_query_filter(mocker, tmp_path):
     db_path = tmp_path / "match_001.sqlite"
     _seed_db(db_path, events=[

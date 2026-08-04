@@ -26,15 +26,16 @@ See `specs/technical_plan.md` for full detail; summary:
 | 1a | Frame Extraction Service (1 FPS, MVP addition) | Implemented and merged: `specs/002-frame-extraction-service/`, `src/cvip/video/frame_extraction.py` |
 | 2 | Scene Detection (PySceneDetect + OpenCV) | Implemented and merged: `specs/003-scene-detection/`, `src/cvip/video/scene_detection.py` |
 | 3 | Replay Detection | Implemented and merged: `specs/004-replay-detection/`, `src/cvip/video/replay_detection.py` |
-| 4 | Scoreboard OCR (Tesseract) | Implemented and merged: `specs/005-scoreboard-ocr/`, `src/cvip/video/scoreboard_ocr.py` |
-| 4a | OCR Timeline Smoother (MVP addition) | In progress: `specs/006-ocr-timeline-smoother/` |
-| 5 | Event Detection | Architecture-level only; **see below before starting** |
+| 4 | Scoreboard OCR (Tesseract) | Implemented and merged: `specs/005-scoreboard-ocr/`, `src/cvip/video/scoreboard_ocr.py`; pluggable per-broadcast-format parser architecture in `scoreboard_parsers.py` (3 formats supported), per-parser preprocessing strategy in `scoreboard_preprocessing.py` |
+| 4a | OCR Timeline Smoother (MVP addition) | Implemented and merged: `specs/006-ocr-timeline-smoother/`, `src/cvip/video/ocr_timeline_smoother.py` |
+| 5 | Event Detection | Implemented and merged: `specs/007-event-detection/`, `src/cvip/events/detection.py`; State Transition Detection (`src/cvip/events/state_transition.py`) collapses the raw OCR timeline into distinct score states before comparison — see below before starting further work here |
 | 6 | Fielding Detection | Deferred post-MVP (`docs/RISK_REGISTER.md` R4) |
 | 7 | Event Ranking | Values live in `config/default.yaml`, not duplicated elsewhere |
-| 8 | Clip Generator | Architecture-level only |
-| 9 | Video Stitcher (FFmpeg) | Architecture-level only |
-| — | Pipeline Orchestrator | Sequences 1→1a→2→3→4→4a→5 for `analyze`, and 8→9 for `generate`; owns match-registry lookups and resumability |
-| — | CLI (`cvip`) | Full command reference: `specs/cli.md` |
+| 8 | Clip Generator | Implemented and merged: `specs/008-clip-generator/`, `src/cvip/clips/generator.py` |
+| 9 | Video Stitcher (FFmpeg) | Implemented and merged: `specs/009-video-stitcher/`, `src/cvip/stitcher/stitcher.py` |
+| 10 | Event Database (SQLite persistence/query layer) | Implemented and merged: `specs/010-event-database/`, `src/cvip/db/database.py` |
+| — | Pipeline Orchestrator | Sequences 1→1a→2→3→4→4a→5 for `analyze`, and 8→9 for `generate`; owns match-registry lookups and resumability. **Not yet implemented** — Modules 1-10 all exist as independently callable libraries, but nothing yet wires them into the actual `cvip analyze`/`cvip generate` CLI flow end-to-end. |
+| — | CLI (`cvip`) | Full command reference: `specs/cli.md`. **Not yet implemented** — no `cvip` entry point exists yet; every module above is currently exercised via direct Python calls (see the various `run_*.py` scripts at the repo root) or its own test suite, not a real CLI. |
 
 **Before specifying Module 5 (Event Detection) or the Event Database**: read `specs/technical_plan.md`'s "Event Taxonomy & Detectability" and "Cross-Cutting Concern" sections. The data model cannot currently distinguish dismissal types (bowled/caught/LBW/run out/stumped) or attribute a catch to a fielder — `RUN_OUT`, `CATCH`, `HAT_TRICK`, `MATCH_WINNING_SHOT`, `GREAT_FIELDING` are explicitly out of scope until that data source is designed. Do not add them back to `config/default.yaml`'s `ranking` block without resolving this first.
 

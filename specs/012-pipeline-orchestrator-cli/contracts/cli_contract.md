@@ -14,6 +14,8 @@ The `main()` function `pyproject.toml`'s `cvip = "cvip.cli:main"` entry point ca
 
 Every option `specs/cli.md` documents for `player`/`team`/`custom` templates (`--batting`, `--bowling`, `--fielding`, `--complete`) is also accepted at the parser level (so the interface doesn't need to change once V1.5 implements them, per `specs/cli.md`'s own "Template implementation status" note) but has no effect for MVP beyond the template-rejection path (`orchestrator_contract.md`'s `generate()`).
 
+**`generate`/`export-timeline`'s `match_id` positional accepts either form `specs/cli.md`'s own "Required Input: Match ID or path to match database" wording documents** (`cli.py`'s `_resolve_match_id_and_db_path`): a bare match_id (e.g. `match_001`) resolves via the `data/matches/{match_id}.sqlite` convention `analyze`'s own default `--output-db` uses; a value that looks like a path (contains a path separator, or ends in `.sqlite`) is used directly as `db_path`, with `match_id` derived from its filename stem. This was a real gap until fixed post-merge (manual end-to-end testing, 2026-08-04): `analyze --output-db <custom path>` is documented as supported, but `generate`/`export-timeline` originally always hardcoded the convention path regardless, silently orphaning any database written to a custom location.
+
 ## Behavior
 
 1. Parse `sys.argv` via `argparse`. An `argparse`-level error (missing required argument, invalid choice) → `argparse`'s own usual `SystemExit(2)` behavior is preserved as-is (already matches this feature's exit code 2, "invalid CLI arguments" — no translation needed).

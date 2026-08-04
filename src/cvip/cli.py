@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from typing import Optional, Sequence
 
@@ -80,6 +81,20 @@ def _load_config(path: str) -> dict:
     return config
 
 
+def _resolve_match_id_and_db_path(match_id_or_path: str) -> tuple[str, str]:
+    """cli.md's `generate`/`export-timeline` docs accept a single "Match ID
+    or path to match database" positional. A bare match_id resolves via the
+    same data/matches/{match_id}.sqlite convention analyze's own default
+    --output-db uses; a value that looks like a path (contains a path
+    separator, or ends in .sqlite) is used directly, so a database written
+    to a custom --output-db location during analyze stays reachable here."""
+    looks_like_path = os.sep in match_id_or_path or "/" in match_id_or_path or match_id_or_path.endswith(".sqlite")
+    if looks_like_path:
+        stem = os.path.splitext(os.path.basename(match_id_or_path))[0]
+        return stem, match_id_or_path
+    return match_id_or_path, f"data/matches/{match_id_or_path}.sqlite"
+
+
 def _run_analyze(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
     request = AnalyzeRequest(
@@ -96,10 +111,10 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
 def _run_generate(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
-    db_path = f"data/matches/{args.match_id}.sqlite"
+    match_id, db_path = _resolve_match_id_and_db_path(args.match_id)
     events_config = config.get("events", {})
     request = GenerateRequest(
-        match_id=args.match_id,
+        match_id=match_id,
         db_path=db_path,
         template=args.template,
         output_path=args.output,
@@ -120,8 +135,8 @@ def _run_generate(args: argparse.Namespace) -> int:
 
 
 def _run_export_timeline(args: argparse.Namespace) -> int:
-    db_path = f"data/matches/{args.match_id}.sqlite"
-    timeline = orchestrator.export_timeline(args.match_id, db_path)
+    match_id, db_path = _resolve_match_id_and_db_path(args.match_id)
+    timeline = orchestrator.export_timeline(match_id, db_path)
 
     if args.format == "json":
         payload = {

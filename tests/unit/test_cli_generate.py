@@ -45,6 +45,28 @@ def test_generate_builds_request_and_calls_orchestrator(mocker):
     assert request.db_path == "data/matches/match_001.sqlite"
 
 
+def test_generate_accepts_a_direct_db_path_instead_of_a_bare_match_id(mocker):
+    """Codex/manual-testing finding: analyze's own --output-db flag is
+    documented as accepting a custom path (specs/cli.md), but generate used
+    to always hardcode data/matches/{match_id}.sqlite -- silently unreachable
+    for any db written outside that convention. generate's positional is
+    documented as accepting "Match ID or path to match database"; a value
+    that looks like a path must be used as the db_path directly."""
+    generate_mock = mocker.patch(
+        "cvip.orchestrator.generate",
+        return_value=GenerateResult(output_path="out.mp4", clip_count=0, event_count=0),
+    )
+
+    exit_code = cli.main([
+        "generate", "output/custom_dir/my_match.sqlite", "--template", "match", "--output", "out.mp4",
+    ])
+
+    assert exit_code == 0
+    request = generate_mock.call_args[0][0]
+    assert request.db_path == "output/custom_dir/my_match.sqlite"
+    assert request.match_id == "my_match"
+
+
 def test_generate_orchestrator_error_translates_to_exit_code(mocker):
     mocker.patch(
         "cvip.orchestrator.generate",

@@ -89,6 +89,21 @@ def test_export_timeline_csv_without_output_prints_to_stdout(mocker, capsys):
     assert "FOUR" in output
 
 
+def test_export_timeline_accepts_a_direct_db_path_instead_of_a_bare_match_id(mocker):
+    """Same fix/finding as generate's own equivalent test: a value that
+    looks like a path (contains a separator, or ends in .sqlite) must be
+    used as the db_path directly instead of being wrapped in the
+    data/matches/{match_id}.sqlite convention."""
+    export_mock = mocker.patch("cvip.orchestrator.export_timeline", return_value=_timeline())
+
+    exit_code = cli.main(["export-timeline", "output/custom_dir/my_match.sqlite", "--format", "json"])
+
+    assert exit_code == 0
+    call_args = export_mock.call_args[0]
+    assert call_args[0] == "my_match"
+    assert call_args[1] == "output/custom_dir/my_match.sqlite"
+
+
 def test_export_timeline_csv_with_no_events_writes_no_rows(mocker, tmp_path):
     mocker.patch(
         "cvip.orchestrator.export_timeline",

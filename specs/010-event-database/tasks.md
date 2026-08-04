@@ -165,6 +165,8 @@ Single project, per plan.md Project Structure: new files in `src/cvip/db/` (a ne
 
 **Checkpoint**: All four user stories are independently functional — the full lifecycle works correctly, and every misuse/corruption path fails loudly and specifically.
 
+**Post-merge-review correction (PR #14 Codex review, addressed before merge)**: T047/T050 as originally written included `update_clip_window()` in the `WRITE_AGAINST_COMPLETED_MATCH` gate — confirmed wrong (it would make `cvip generate`'s clip-window bookkeeping unusable, since `generate` only ever runs after the match is already `COMPLETE`) and removed from the gate; see [research.md](./research.md) Decision 5's own correction note and [contracts/event_database_contract.md](./contracts/event_database_contract.md). A second finding from the same review — a failed batch write left partial rows silently committed by a later, unrelated commit — was fixed by adding an explicit rollback to `_run_operation`'s exception handling, with two new regression tests (`test_update_clip_window_succeeds_against_a_completed_match`, `test_a_failed_batch_write_rolls_back_and_is_not_persisted_by_a_later_commit`, `tests/unit/test_event_database_failures.py`).
+
 ---
 
 ## Phase 7: Polish & Cross-Cutting Concerns

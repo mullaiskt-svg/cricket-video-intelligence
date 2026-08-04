@@ -158,18 +158,44 @@ class EventDatabase:
     ) -> None:
         """Runs `work_fn()` (returning an `output_summary` fragment) inside a
         DiagnosticsTracker, emitting exactly one diagnostics record for this
-        operation regardless of outcome (FR-020)."""
+        operation regardless of outcome (FR-020).
+
+        Any exception rolls back the connection's current transaction
+        before re-raising (PR #14 review finding): `sqlite3` leaves an
+        implicit transaction open across a failed `executemany()`/`execute()`
+        call rather than discarding it, so without an explicit rollback
+        here, any *later*, unrelated `commit()` on this same connection
+        (e.g. a subsequent `fail_analysis()` call) would silently persist
+        whatever partial rows the failed operation had already written --
+        violating the "one batch, all-or-nothing" persistence contract this
+        module documents."""
         tracker = DiagnosticsTracker()
         tracker.__enter__()
         try:
             output_summary, _ = work_fn()
         except EventDatabaseError as exc:
+            self._conn.rollback()
             tracker.__exit__(None, None, None)
             diagnostics = tracker.build(
                 module_name=MODULE_NAME,
                 input_summary=f"operation={operation} {input_summary}",
                 output_summary=f"schema_version={schema.SCHEMA_VERSION}",
                 failure_reason=exc.reason.value,
+            )
+            emit_diagnostics(diagnostics)
+            raise
+        except Exception as exc:
+            # An unexpected failure from sqlite3 itself (e.g. a CHECK
+            # constraint violation mid-batch) -- not one of this module's
+            # own EventDatabaseFailureReason values, but the same
+            # rollback/diagnostics discipline still applies.
+            self._conn.rollback()
+            tracker.__exit__(None, None, None)
+            diagnostics = tracker.build(
+                module_name=MODULE_NAME,
+                input_summary=f"operation={operation} {input_summary}",
+                output_summary=f"schema_version={schema.SCHEMA_VERSION}",
+                failure_reason=type(exc).__name__,
             )
             emit_diagnostics(diagnostics)
             raise
@@ -395,10 +421,22 @@ class EventDatabase:
         """FR-011: updates only this event's clip_start_seconds/
         clip_end_seconds; every other column untouched. Repeated calls for
         the same event each succeed, reflecting only the most recent call
-        (Edge Cases; Assumptions -- best-effort tracking)."""
+        (Edge Cases; Assumptions -- best-effort tracking).
+
+        Deliberately NOT gated by WRITE_AGAINST_COMPLETED_MATCH (PR #14
+        review finding, correcting this module's own original contract
+        text): unlike persist_scoreboard_readings/persist_replays/
+        persist_events (which represent analysis results and must be
+        blocked once a match is COMPLETE, to prevent silently re-running
+        analysis without an explicit reset), this call represents
+        `cvip generate`-time bookkeeping -- and `generate` only ever runs
+        *after* `cvip analyze` has already marked the match COMPLETE. Gating
+        this the same way as the batch-persist methods would make the
+        documented post-analysis clip-window update path permanently
+        unusable for the platform's normal analyze-once-generate-later
+        workflow."""
 
         def work() -> Tuple[str, None]:
-            self._check_write_allowed("update_clip_window")
             self._conn.execute(
                 "UPDATE events SET clip_start_seconds = ?, clip_end_seconds = ? WHERE event_id = ?",
                 (clip_start_seconds, clip_end_seconds, int(event_key)),

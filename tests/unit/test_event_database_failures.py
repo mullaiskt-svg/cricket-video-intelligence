@@ -114,7 +114,6 @@ def test_opening_a_file_with_mismatched_schema_version_raises(tmp_path):
         lambda db: db.persist_events([_Event()]),
         lambda db: db.persist_replays([_Replay()]),
         lambda db: db.persist_scoreboard_readings([_Reading()]),
-        lambda db: db.update_clip_window("1", 1.0, 2.0),
     ],
 )
 def test_write_against_a_completed_match_is_rejected(tmp_path, operation):
@@ -127,6 +126,48 @@ def test_write_against_a_completed_match_is_rejected(tmp_path, operation):
 
         assert exc_info.value.reason == EventDatabaseFailureReason.WRITE_AGAINST_COMPLETED_MATCH
         # No row was written by the rejected attempt.
+        assert db.query_events(EventQueryFilter()) == ()
+
+
+def test_update_clip_window_succeeds_against_a_completed_match(tmp_path):
+    """PR #14 review finding: update_clip_window() represents `cvip
+    generate`-time bookkeeping, which only ever runs *after* `cvip analyze`
+    has already marked the match COMPLETE -- unlike the three batch-persist
+    methods above, it must NOT be blocked by the WRITE_AGAINST_COMPLETED_MATCH
+    gate, or the platform's normal analyze-once-generate-later workflow
+    would be permanently broken."""
+    with open_database(tmp_path / "match.sqlite") as db:
+        _begin(db)
+        db.persist_events([_Event()])
+        db.complete_analysis()
+        event_key = db.query_events(EventQueryFilter())[0].event_key
+
+        db.update_clip_window(event_key, 5.0, 15.0)  # must not raise
+
+        updated = db.query_events(EventQueryFilter())[0]
+        assert (updated.clip_start_seconds, updated.clip_end_seconds) == (5.0, 15.0)
+
+
+def test_a_failed_batch_write_rolls_back_and_is_not_persisted_by_a_later_commit(tmp_path):
+    """PR #14 review finding: sqlite3 leaves an implicit transaction open
+    across a failed executemany() rather than discarding it -- without an
+    explicit rollback, a later, unrelated commit on the same connection
+    (e.g. fail_analysis()) would silently persist whatever partial rows the
+    failed batch had already written, violating the "one batch, all-or-
+    nothing" persistence contract."""
+
+    class _BadEvent(_Event):
+        event_type = "NOT_A_REAL_EVENT_TYPE"  # violates the events.event_type CHECK constraint
+
+    with open_database(tmp_path / "match.sqlite") as db:
+        _begin(db)
+
+        with pytest.raises(Exception):
+            db.persist_events([_Event(), _BadEvent()])  # first row would insert, second fails
+
+        db.fail_analysis()  # a later, unrelated commit on the same connection
+
+    with open_database(tmp_path / "match.sqlite") as db:
         assert db.query_events(EventQueryFilter()) == ()
 
 

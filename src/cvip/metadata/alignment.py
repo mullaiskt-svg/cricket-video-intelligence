@@ -66,19 +66,24 @@ def align(
 def _check_positions_in_range(
     ground_truth: Sequence[MetadataEvent], scoreboard_readings: Sequence[dict]
 ) -> None:
-    known_overs = [
-        r["over_number"] for r in scoreboard_readings if r.get("over_number") is not None
-    ]
-    if not known_overs:
+    innings_max_over: Dict[int, int] = {}
+    for r in scoreboard_readings:
+        if r.get("over_number") is not None and r.get("innings") is not None:
+            i = r["innings"]
+            innings_max_over[i] = max(innings_max_over.get(i, 0), r["over_number"])
+    if not innings_max_over:
         return
-    known_max_over = max(known_overs)
     for metadata_event in ground_truth:
-        if metadata_event.over_number > known_max_over:
+        innings_known_max = innings_max_over.get(metadata_event.innings)
+        if innings_known_max is None:
+            continue  # no readings for this innings -- skip, alignment will handle it
+        if metadata_event.over_number > innings_known_max:
             raise MetadataValidationError(
                 MetadataValidationFailureReason.POSITION_OUT_OF_RANGE,
                 f"metadata event at innings={metadata_event.innings} "
                 f"over={metadata_event.over_number}.{metadata_event.ball_in_over} exceeds "
-                f"this match's own known range (max over observed: {known_max_over})",
+                f"innings {metadata_event.innings}'s own known range "
+                f"(max over observed for that innings: {innings_known_max})",
             )
 
 

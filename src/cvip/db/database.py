@@ -537,6 +537,25 @@ class EventDatabase:
         ).fetchone()
         return row is not None
 
+    def get_recovered_event_id(
+        self, metadata_file_hash: str, metadata_event_identifier: str
+    ) -> Optional[int]:
+        """Returns the event_id of a previously recovered event for the
+        given (metadata_file_hash, metadata_event_identifier) pair, or
+        None if no RECOVERY operation has been recorded. Used by
+        enrichment to look up event_ids for recovered wickets so they
+        can be enriched even when their alignment entry's outcome is
+        still RECOVERABLE_MISS (the alignment evidence is never mutated
+        after Stage 2, so recovered events remain RECOVERABLE_MISS in
+        the in-memory alignment). Pure read -- no diagnostics record."""
+        row = self._conn.execute(
+            "SELECT affected_event_id FROM metadata_operations "
+            "WHERE metadata_file_hash = ? AND metadata_event_identifier = ? "
+            "AND operation_type = 'RECOVERY'",
+            (metadata_file_hash, metadata_event_identifier),
+        ).fetchone()
+        return int(row[0]) if row is not None and row[0] is not None else None
+
     def persist_recovered_event(
         self,
         event: RecoveredEventLike,

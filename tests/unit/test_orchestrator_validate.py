@@ -175,6 +175,28 @@ def test_enrich_true_attaches_dismissal_detail_to_a_true_positive_wicket(tmp_pat
     assert events[0]["fielder"] == "Dileep KP"
 
 
+def test_recover_and_enrich_together_enriches_a_recovered_wicket(tmp_path):
+    # Regression path: a wicket missed by OCR (RECOVERABLE_MISS) must be
+    # both recovered AND enriched when --recover --enrich are both supplied.
+    db_path = tmp_path / "match.sqlite"
+    _seed(db_path, readings=[_Reading(300.0, over_number=1, ball_in_over=1)])
+    metadata_path = _metadata_file(
+        tmp_path,
+        [{"innings": 1, "commentary": [{"ball": "1.1", "description": "OUT (X c Dileep KP b Sai Kiran)"}]}],
+    )
+
+    result = validate(ValidateRequest(db_path=str(db_path), metadata_path=metadata_path, recover=True, enrich=True))
+
+    assert result.recovered_count == 1
+    assert result.enriched_count == 1
+    with open_database(db_path) as db:
+        events = db.get_match_timeline().events
+    assert len(events) == 1
+    assert events[0]["source"] == "METADATA"
+    assert events[0]["dismissal_type"] == "CAUGHT"
+    assert events[0]["fielder"] == "Dileep KP"
+
+
 def test_a_metadata_validation_error_from_recover_events_maps_to_invalid_arguments(tmp_path, mocker):
     # Defense-in-depth path: recovery.py's own MATCH_NOT_COMPLETE check
     # (research.md Decision -- recovery.py is independently testable and

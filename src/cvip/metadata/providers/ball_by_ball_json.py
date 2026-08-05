@@ -19,6 +19,7 @@ A single-innings match supplies only one entry in `innings` (Edge Cases:
 from __future__ import annotations
 
 import json
+import re
 from typing import Tuple
 
 from cvip.metadata.errors import MetadataValidationError, MetadataValidationFailureReason
@@ -66,16 +67,18 @@ class BallByBallJsonProvider:
         return tuple(events)
 
 
+_OUT_RE = re.compile(r"\bOUT\b")
+
+
 def _classify(description: str):
-    """FOUR/SIX/WICKET keyword classification -- the same substring rule
-    already proven in ground_truth_v2/build_ground_truth.py. Any other
-    delivery (a dot ball, a single/double, a wide, etc.) is not a
-    ground-truth event and is silently excluded, not an error."""
+    """FOUR/SIX/WICKET keyword classification. Uses word-boundary matching
+    for OUT to avoid false positives from substrings like "ABOUT" or
+    "OUTSIDE" that contain "OUT" but are not wicket deliveries."""
     if "SIX" in description:
         return "SIX"
     if "FOUR" in description:
         return "FOUR"
-    if "OUT" in description:
+    if _OUT_RE.search(description):
         return "WICKET"
     return None
 

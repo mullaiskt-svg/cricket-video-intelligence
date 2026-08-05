@@ -35,10 +35,12 @@ def analyze_accuracy(
     with_signal = [item for item in alignment if item.outcome == AlignmentOutcome.RECOVERABLE_MISS]
 
     matched_detected_ids = {
-        id(item.matched_detected_event) for item in alignment if item.matched_detected_event is not None
+        item.matched_detected_event.get("event_id")
+        for item in alignment
+        if item.matched_detected_event is not None
     }
     scoring_detected = [e for e in detected_events if e.get("event_type") in _SCORING_EVENT_TYPES]
-    matched_count = sum(1 for e in scoring_detected if id(e) in matched_detected_ids)
+    matched_count = sum(1 for e in scoring_detected if e.get("event_id") in matched_detected_ids)
     false_positives = len(scoring_detected) - matched_count
 
     recall_by_event_type = {}

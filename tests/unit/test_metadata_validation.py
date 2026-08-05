@@ -19,7 +19,7 @@ def _evidence(event_type, outcome, matched_detected_event=None):
 
 
 def test_counts_true_positives_and_the_no_signal_vs_signal_but_missed_split():
-    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0}
+    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0, "event_id": 1}
     alignment = (
         _evidence("FOUR", AlignmentOutcome.TRUE_POSITIVE, matched_detected_event=detected_four),
         _evidence("SIX", AlignmentOutcome.RECOVERABLE_MISS),
@@ -35,7 +35,7 @@ def test_counts_true_positives_and_the_no_signal_vs_signal_but_missed_split():
 
 
 def test_recall_is_computed_per_event_type():
-    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0}
+    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0, "event_id": 1}
     alignment = (
         _evidence("FOUR", AlignmentOutcome.TRUE_POSITIVE, matched_detected_event=detected_four),
         _evidence("FOUR", AlignmentOutcome.UNRECOVERABLE_MISS),
@@ -50,8 +50,8 @@ def test_recall_is_computed_per_event_type():
 
 
 def test_false_positives_are_detected_events_with_no_ground_truth_match():
-    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0}
-    detected_six_unmatched = {"event_type": "SIX", "timestamp_seconds": 500.0}
+    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0, "event_id": 1}
+    detected_six_unmatched = {"event_type": "SIX", "timestamp_seconds": 500.0, "event_id": 2}
     alignment = (_evidence("FOUR", AlignmentOutcome.TRUE_POSITIVE, matched_detected_event=detected_four),)
 
     report = analyze_accuracy(alignment, detected_events=(detected_four, detected_six_unmatched))
@@ -60,8 +60,8 @@ def test_false_positives_are_detected_events_with_no_ground_truth_match():
 
 
 def test_precision_is_true_positives_over_all_scoring_detected_events():
-    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0}
-    detected_six_unmatched = {"event_type": "SIX", "timestamp_seconds": 500.0}
+    detected_four = {"event_type": "FOUR", "timestamp_seconds": 1.0, "event_id": 1}
+    detected_six_unmatched = {"event_type": "SIX", "timestamp_seconds": 500.0, "event_id": 2}
     alignment = (_evidence("FOUR", AlignmentOutcome.TRUE_POSITIVE, matched_detected_event=detected_four),)
 
     report = analyze_accuracy(alignment, detected_events=(detected_four, detected_six_unmatched))

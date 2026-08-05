@@ -610,6 +610,9 @@ def validate(request: ValidateRequest) -> ValidateResult:
         if isinstance(exc, EventDatabaseError):
             raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
         raise
+    except Exception:
+        tracker.__exit__(None, None, None)
+        raise
 
     alignment_success_rate = (
         (report.true_positives + report.false_negatives_with_signal) / report.ground_truth_total
@@ -666,7 +669,11 @@ def _run_validate(request: ValidateRequest):
         recovered_count = 0
         skipped_recovery_count = 0
         enriched_count = 0
-        metadata_file_hash = _file_hash(request.metadata_path)
+        # Only hash the metadata file when a write operation will use it
+        # (the hash is only needed for idempotency keys in metadata_operations).
+        metadata_file_hash = (
+            _file_hash(request.metadata_path) if (request.recover or request.enrich) else None
+        )
 
         if request.recover:
             candidates = find_recovery_candidates(alignment)

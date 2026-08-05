@@ -83,10 +83,22 @@ def enrich_wickets(
     for item in alignment:
         if item.metadata_event.event_type != "WICKET":
             continue
-        if item.outcome != AlignmentOutcome.TRUE_POSITIVE:
-            continue
 
         identifier = metadata_event_identifier(item.metadata_event)
+
+        if item.outcome == AlignmentOutcome.TRUE_POSITIVE:
+            event_id = int(item.matched_detected_event["event_id"])
+        elif item.outcome == AlignmentOutcome.RECOVERABLE_MISS:
+            # Alignment evidence is never mutated after Stage 2, so a
+            # wicket recovered in Stage 5 still shows RECOVERABLE_MISS
+            # here. Look up whether recovery already ran by checking
+            # metadata_operations for a matching RECOVERY row.
+            event_id = db.get_recovered_event_id(metadata_file_hash, identifier)
+            if event_id is None:
+                continue  # not yet recovered (--recover not used, or skipped)
+        else:
+            continue  # UNRECOVERABLE_MISS -- no event to enrich
+
         if db.has_metadata_operation(metadata_file_hash, identifier, "ENRICHMENT"):
             continue
 
@@ -96,7 +108,6 @@ def enrich_wickets(
             # audit row either, since nothing was actually changed.
             continue
 
-        event_id = int(item.matched_detected_event["event_id"])
         db.update_dismissal_detail(
             event_id,
             detail.dismissal_type,

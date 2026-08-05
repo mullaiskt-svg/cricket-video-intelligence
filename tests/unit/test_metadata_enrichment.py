@@ -62,9 +62,10 @@ def test_caught_is_preferred_over_the_bare_bowled_pattern_it_also_contains():
     assert detail.dismissal_type == "CAUGHT"
 
 
-def _db(mocker, already_enriched=False):
+def _db(mocker, already_enriched=False, recovered_event_id=None):
     db = mocker.MagicMock()
     db.has_metadata_operation.return_value = already_enriched
+    db.get_recovered_event_id.return_value = recovered_event_id
     return db
 
 
@@ -104,14 +105,45 @@ def test_enrich_wickets_skips_and_writes_nothing_for_an_unrecognizable_descripti
     db.update_dismissal_detail.assert_not_called()
 
 
-def test_enrich_wickets_ignores_non_true_positive_entries(mocker):
-    db = _db(mocker)
+def test_enrich_wickets_ignores_recoverable_miss_without_prior_recovery(mocker):
+    # RECOVERABLE_MISS entries ARE processed, but only when recovery has
+    # already run (i.e., get_recovered_event_id returns non-None). When
+    # recovery hasn't run yet, they are skipped without writing anything.
+    db = _db(mocker, recovered_event_id=None)
     evidence = (_evidence("X c Dileep KP b Sai Kiran", outcome=AlignmentOutcome.RECOVERABLE_MISS),)
 
     enriched = enrich_wickets(evidence, db, "meta.json", "hash123")
 
     assert enriched == ()
     db.update_dismissal_detail.assert_not_called()
+
+
+def test_enrich_wickets_enriches_a_recovered_wicket_when_recovery_has_already_run(mocker):
+    # A RECOVERABLE_MISS wicket that was recovered in Stage 5 should be
+    # enriched: get_recovered_event_id returns the new event_id so
+    # update_dismissal_detail can write against that row.
+    db = _db(mocker, recovered_event_id=42)
+    evidence = (_evidence("X c Dileep KP b Sai Kiran", outcome=AlignmentOutcome.RECOVERABLE_MISS),)
+
+    enriched = enrich_wickets(evidence, db, "meta.json", "hash123")
+
+    assert len(enriched) == 1
+    db.update_dismissal_detail.assert_called_once()
+    call_args = db.update_dismissal_detail.call_args[0]
+    assert call_args[0] == 42
+    assert call_args[1] == "CAUGHT"
+    assert call_args[2] == "Dileep KP"
+
+
+def test_enrich_wickets_ignores_unrecoverable_miss_entirely(mocker):
+    db = _db(mocker)
+    evidence = (_evidence("X c Dileep KP b Sai Kiran", outcome=AlignmentOutcome.UNRECOVERABLE_MISS),)
+
+    enriched = enrich_wickets(evidence, db, "meta.json", "hash123")
+
+    assert enriched == ()
+    db.update_dismissal_detail.assert_not_called()
+    db.get_recovered_event_id.assert_not_called()
 
 
 def test_enrich_wickets_ignores_non_wicket_event_types(mocker):

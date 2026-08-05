@@ -116,6 +116,14 @@ def _require_native_dependencies() -> None:
 # and Event Detection's own FR-010 already establish, applied here as a
 # simple forward scan purely for persistence) --------------------------------
 
+#: Maximum runs value that can open a new innings. A genuine innings break
+#: resets runs to near 0; OCR noise only fluctuates readings by a few units
+#: (e.g., 147 → 143) and will never produce a near-zero reading at mid-innings.
+#: Without this guard, simultaneous small OCR-noise decreases in both runs
+#: and wickets (e.g., PLATINUM CUP FINAL: 147→143 and 5→3) triggered
+#: spurious innings increments, fragmenting 2 real innings into 9 fake ones.
+_NEW_INNINGS_MAX_RUNS = 20
+
 
 class _ScoreboardReadingWithInnings:
     """Adapter satisfying cvip.db.models.ScoreboardReadingLike -- wraps a
@@ -150,6 +158,7 @@ def _tag_readings_with_innings(samples) -> List[_ScoreboardReadingWithInnings]:
                 and last_wickets is not None
                 and sample.runs < last_runs
                 and sample.wickets < last_wickets
+                and sample.runs < _NEW_INNINGS_MAX_RUNS
             ):
                 innings += 1
             last_runs, last_wickets = sample.runs, sample.wickets

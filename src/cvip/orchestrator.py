@@ -10,6 +10,7 @@ already-implemented, already-tested module.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import os
@@ -24,6 +25,7 @@ from loguru import logger
 from cvip.clips.errors import ClipGenerationError
 from cvip.clips.generator import generate_clips
 from cvip.clips.models import ClipGenerationRequest
+from cvip.common.diagnostics import DiagnosticsTracker
 from cvip.db.database import open_database
 from cvip.db.errors import EventDatabaseError
 from cvip.db.models import (
@@ -36,6 +38,13 @@ from cvip.db.models import (
 from cvip.events.detection import detect_events
 from cvip.events.errors import EventDetectionError
 from cvip.events.models import EventDetectionRequest
+from cvip.metadata.alignment import align
+from cvip.metadata.diagnostics import emit_validation_diagnostics
+from cvip.metadata.enrichment import enrich_wickets
+from cvip.metadata.errors import MetadataValidationError
+from cvip.metadata.extraction import extract_ground_truth
+from cvip.metadata.recovery import find_recovery_candidates, recover_events
+from cvip.metadata.validation import analyze_accuracy
 from cvip.orchestrator_errors import OrchestratorError, OrchestratorFailureReason
 from cvip.orchestrator_models import (
     AnalysisRun,
@@ -43,6 +52,8 @@ from cvip.orchestrator_models import (
     DependencyCheckResult,
     GenerateRequest,
     GenerateResult,
+    ValidateRequest,
+    ValidateResult,
 )
 from cvip.stitcher.errors import VideoStitchingError, VideoStitchingFailureReason
 from cvip.stitcher.models import StitchRequest
@@ -540,3 +551,135 @@ def _check_directory_writable(label: str, directory: str) -> DependencyCheckResu
         return DependencyCheckResult(name=label, ok=True)
     except OSError as exc:
         return DependencyCheckResult(name=label, ok=False, detail=str(exc))
+
+
+# -- Capability: validate() (specs/013-match-metadata-validation/) ----------
+
+
+def _file_hash(path: str) -> str:
+    """A simple whole-file digest identifying a metadata file's exact
+    content -- deliberately not Video Loader's own sampled `file_hash`
+    (FR-014), since a metadata file is small text, not multi-GB video; a
+    full read is cheap here."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        digest.update(f.read())
+    return digest.hexdigest()
+
+
+def validate(request: ValidateRequest) -> ValidateResult:
+    """specs/013-match-metadata-validation/contracts/orchestrator_validate_contract.md.
+    Stages 1-3 (Ground Truth Extraction -> Timeline Alignment -> Accuracy
+    Analysis) always run; Stages 4-5 (Recovery) only if `request.recover`;
+    Stage 6 (Enrichment) only if `request.enrich`. With neither flag, no
+    write of any kind reaches the database (FR-003's structural
+    read-only-by-default guarantee).
+
+    Emits exactly one diagnostics record per invocation regardless of
+    outcome (matching db/database.py's own `_run_operation` convention of
+    recording every distinguishable failure, not just successes)."""
+    input_summary = (
+        f"db_path={request.db_path} metadata_path={request.metadata_path} "
+        f"recover={request.recover} enrich={request.enrich}"
+    )
+    # Manual __enter__/__exit__ (not a `with` block), matching
+    # db/database.py's own _run_operation precedent exactly: __exit__ must
+    # run immediately before build() on *every* exit path so its captured
+    # end-time/peak-memory reflect that path's own real work, not whatever
+    # ran after a `with` block's delayed, single exit point would imply.
+    tracker = DiagnosticsTracker()
+    tracker.__enter__()
+    try:
+        report, recovered_count, skipped_recovery_count, enriched_count = _run_validate(request)
+    except (OrchestratorError, EventDatabaseError) as exc:
+        # Both OrchestratorError and EventDatabaseError carry a `.reason`
+        # enum member -- same shape, different taxonomy.
+        reason = exc.reason.value
+        tracker.__exit__(None, None, None)
+        emit_validation_diagnostics(
+            tracker,
+            input_summary=input_summary,
+            metadata_entries_parsed=0,
+            alignment_success_rate=0.0,
+            unrecoverable_events=0,
+            recovered_events=0,
+            enriched_wicket_events=0,
+            ambiguous_alignments=0,
+            failure_reason=reason,
+        )
+        if isinstance(exc, EventDatabaseError):
+            raise OrchestratorError(OrchestratorFailureReason.DATABASE_FAILURE, exc.detail) from exc
+        raise
+
+    alignment_success_rate = (
+        (report.true_positives + report.false_negatives_with_signal) / report.ground_truth_total
+        if report.ground_truth_total
+        else 0.0
+    )
+    tracker.__exit__(None, None, None)
+    emit_validation_diagnostics(
+        tracker,
+        input_summary=input_summary,
+        metadata_entries_parsed=report.ground_truth_total,
+        alignment_success_rate=alignment_success_rate,
+        unrecoverable_events=report.false_negatives_no_signal,
+        recovered_events=recovered_count,
+        enriched_wicket_events=enriched_count,
+        ambiguous_alignments=0,
+    )
+
+    return ValidateResult(
+        report=report,
+        recovered_count=recovered_count,
+        skipped_recovery_count=skipped_recovery_count,
+        enriched_count=enriched_count,
+    )
+
+
+def _run_validate(request: ValidateRequest):
+    """The actual Stage 1-6 sequence, factored out of validate() so every
+    exit path (success or failure) shares one diagnostics-emission point."""
+    with open_database(Path(request.db_path)) as db:
+        summary = db.get_match_summary()
+        if summary.status != "COMPLETE":
+            raise OrchestratorError(
+                OrchestratorFailureReason.INVALID_ARGUMENTS,
+                "match is not COMPLETE; validate requires a fully-analyzed match",
+            )
+
+        try:
+            ground_truth = extract_ground_truth(request.metadata_path)
+        except MetadataValidationError as exc:
+            if not os.path.exists(request.metadata_path):
+                raise OrchestratorError(OrchestratorFailureReason.MISSING_INPUT_FILE, exc.detail) from exc
+            raise OrchestratorError(OrchestratorFailureReason.INVALID_ARGUMENTS, exc.detail) from exc
+
+        timeline = db.get_match_timeline()
+
+        try:
+            alignment = align(ground_truth, timeline.scoreboard_readings, timeline.events)
+        except MetadataValidationError as exc:
+            raise OrchestratorError(OrchestratorFailureReason.INVALID_ARGUMENTS, exc.detail) from exc
+
+        report = analyze_accuracy(alignment, timeline.events)
+
+        recovered_count = 0
+        skipped_recovery_count = 0
+        enriched_count = 0
+        metadata_file_hash = _file_hash(request.metadata_path)
+
+        if request.recover:
+            candidates = find_recovery_candidates(alignment)
+            try:
+                recovered, skipped_recovery_count = recover_events(
+                    candidates, db, request.metadata_path, metadata_file_hash
+                )
+            except MetadataValidationError as exc:
+                raise OrchestratorError(OrchestratorFailureReason.INVALID_ARGUMENTS, exc.detail) from exc
+            recovered_count = len(recovered)
+
+        if request.enrich:
+            enriched = enrich_wickets(alignment, db, request.metadata_path, metadata_file_hash)
+            enriched_count = len(enriched)
+
+        return report, recovered_count, skipped_recovery_count, enriched_count

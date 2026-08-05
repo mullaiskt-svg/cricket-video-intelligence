@@ -21,6 +21,7 @@ cvip generate match_id --template match --output output/match_highlights.mp4
 cvip generate match_id --template player --player "Virat Kohli" --output output/player.mp4
 cvip export-timeline match_id --format json --output output/timeline.json
 cvip inspect-db data/matches/match_id.sqlite
+cvip validate match_id --metadata commentary.json --recover --enrich
 ```
 
 ---
@@ -324,7 +325,51 @@ Status: OK
 
 ---
 
-## 9. Recommended Exit Codes
+## 9. Validate Match Metadata (specs/013-match-metadata-validation/)
+
+```bash
+cvip validate match_id --metadata commentary.json
+```
+
+Not to be confused with `cvip doctor` (Section 8, "Validate Environment") -- this command validates a match's *detection accuracy* against externally-supplied ball-by-ball commentary, not the local machine's runtime dependencies.
+
+### Description
+
+An optional, decoupled post-hoc command that aligns a match's own OCR-detected events against a locally-supplied ball-by-ball metadata file. With no flags, reports recall/precision and is strictly read-only. `--recover` additionally inserts events the OCR-only pipeline missed entirely (source-tagged `METADATA`, never overwriting an OCR-detected event). `--enrich` additionally attaches dismissal type and fielder to wicket events where the metadata states them.
+
+`cvip analyze`/`cvip generate` behave identically whether or not this command is ever run -- metadata is never a required input.
+
+### Required Input
+
+- Match ID or path to match database (same dual form `generate`/`export-timeline` accept).
+- `--metadata PATH`: a locally-supplied ball-by-ball JSON file.
+
+### Optional Arguments
+
+```bash
+--recover
+--enrich
+--output report.json
+```
+
+### Rules
+
+- Must refuse if the target match's analysis status is not `COMPLETE`.
+- Must refuse if the metadata file doesn't exist or doesn't parse into the expected shape.
+- Must never write anything without `--recover`/`--enrich` explicitly supplied.
+- Must never modify an existing OCR-detected event's timestamp, confidence, or type.
+- Running `--recover`/`--enrich` more than once against the same match and metadata file must not create duplicates.
+
+### Example
+
+```bash
+cvip validate match_001 --metadata commentary.json
+cvip validate match_001 --metadata commentary.json --recover --enrich --output report.json
+```
+
+---
+
+## 10. Recommended Exit Codes
 
 | Code | Meaning |
 | ---- | ------- |
@@ -341,7 +386,7 @@ Status: OK
 
 ---
 
-## 10. Example MVP Workflow
+## 11. Example MVP Workflow
 
 ```bash
 cvip doctor
@@ -369,7 +414,7 @@ cvip generate match_001 --template match --output output/match_001_highlights.mp
 
 ---
 
-## 11. Non-Goals for MVP CLI
+## 12. Non-Goals for MVP CLI
 
 The MVP CLI does not need to include:
 
@@ -383,7 +428,7 @@ The MVP CLI does not need to include:
 
 ---
 
-## 12. CLI Design Rules
+## 13. CLI Design Rules
 
 - Commands must be deterministic.
 - Commands must work offline.

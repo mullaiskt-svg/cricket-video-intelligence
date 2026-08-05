@@ -185,8 +185,9 @@ PRD Section 7's importance table and Section 8's full event taxonomy list severa
 **Decision**: These event types are explicitly out of scope for MVP and V1.5, not implicitly missing. They require one of:
 - An enhanced OCR source (e.g., reading a post-wicket "how out" scorecard overlay, if/when broadcasts reliably show one) — undesigned, not scheduled.
 - Module 6 (Fielding Detection, already deferred post-MVP per `docs/RISK_REGISTER.md` R4) for `Catch`/`Great Fielding`.
+- **Resolved for dismissal subtype/fielder attribution specifically** (`specs/013-match-metadata-validation/`, `src/cvip/metadata/`, `cvip validate --enrich`): "another reliable player-stat source" — user-supplied ball-by-ball commentary — is exactly what this section anticipated needing. `events.dismissal_type`/`events.fielder` (schema v2) are populated when a user supplies commentary and runs `--enrich`, extracted from real phrasings ("c FIELDER b BOWLER", "run out (FIELDER)", etc.). This is additive detail on an existing `WICKET` row, not a new `event_type` — `RUN_OUT`/`CATCH` are still not standalone detectable event types (see below), and a match analyzed without metadata still has `dismissal_type`/`fielder` as `NULL`, exactly as before.
 
-**`FIFTY`/`CENTURY` are also out of scope, for a distinct reason**: `runs` (Module 4's OCR field, tracked monotonically alongside `wickets` per `specs/005-scoreboard-ocr/data-model.md`) is the **team total**, not any individual batter's own score — no module extracts a per-batter running score. `FIFTY`/`CENTURY` conventionally mean *a specific batter* reaching 50/100 runs, which this data cannot express; only `TEAM_MILESTONE` (the team total crossing a round number) is derivable from `runs` directly. This was caught during Module 5's own `/speckit-specify` (see `specs/007-event-detection/`), not at the original architecture-summary level. Re-scoping `FIFTY`/`CENTURY` in requires an enhanced OCR source (per-batter running score) or another reliable player-stat source — undesigned, not scheduled.
+**`FIFTY`/`CENTURY` are also out of scope, for a distinct reason**: `runs` (Module 4's OCR field, tracked monotonically alongside `wickets` per `specs/005-scoreboard-ocr/data-model.md`) is the **team total**, not any individual batter's own score — no module extracts a per-batter running score. `FIFTY`/`CENTURY` conventionally mean *a specific batter* reaching 50/100 runs, which this data cannot express; only `TEAM_MILESTONE` (the team total crossing a round number) is derivable from `runs` directly. This was caught during Module 5's own `/speckit-specify` (see `specs/007-event-detection/`), not at the original architecture-summary level. Re-scoping `FIFTY`/`CENTURY` in requires an enhanced OCR source (per-batter running score) or another reliable player-stat source — still undesigned/not scheduled: `specs/013-match-metadata-validation/` (which supplied exactly this kind of "another reliable player-stat source" for dismissal subtype/fielder above) deliberately did not extend to per-batter run milestones — its ground-truth extraction classifies only `FOUR`/`SIX`/`WICKET` deliveries, not a running per-batter score. A future amendment to that feature (a new provider-side FIFTY/CENTURY extraction stage) would need its own scoping, not assumed to fall out of the existing design for free.
 
 Until one of those exists, `config/default.yaml`'s `ranking` block MUST only contain entries for event types Module 5 can actually emit (see Module 5 above). Do not add `HAT_TRICK`, `MATCH_WINNING_SHOT`, `RUN_OUT`, `CATCH`, `GREAT_FIELDING`, `FIFTY`, or `CENTURY` back into the config until their respective data source is designed — their presence previously implied detectability the pipeline didn't have.
 
@@ -248,6 +249,13 @@ CREATE TABLE events (
   is_replay BOOLEAN,        -- denormalized from `replays` at write time; `replays` is the source of truth
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Schema v2 amendment (specs/013-match-metadata-validation/data-model.md): three
+-- additive columns -- source TEXT CHECK (source IN ('OCR','METADATA')) NOT NULL
+-- DEFAULT 'OCR'; dismissal_type TEXT CHECK (... OR NULL); fielder TEXT -- plus a
+-- new append-only metadata_operations audit table (own CREATE TABLE, that spec's
+-- data-model.md). src/cvip/db/schema.py is the authoritative DDL; not duplicated
+-- here to avoid drifting out of sync with it again.
 
 CREATE INDEX idx_events_event_type ON events (event_type);
 CREATE INDEX idx_events_player ON events (player);

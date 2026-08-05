@@ -14,7 +14,13 @@ import sqlite3
 #: database file wouldn't be compatible with. No migration framework exists
 #: yet (out of MVP scope) -- a mismatch is reported (SCHEMA_VERSION_MISMATCH),
 #: never silently worked around.
-SCHEMA_VERSION = 1
+#:
+#: v2 (specs/013-match-metadata-validation/data-model.md): additive only --
+#: events.source/dismissal_type/fielder columns and the new
+#: metadata_operations table. No existing column redefined, so a v1
+#: database remains readable; it is simply not writable by this feature
+#: until re-analyzed (cvip analyze --force) into a fresh v2 database.
+SCHEMA_VERSION = 2
 
 _CREATE_TABLES_SQL = """
 CREATE TABLE matches (
@@ -47,6 +53,12 @@ CREATE TABLE events (
   clip_start_seconds REAL,
   clip_end_seconds REAL,
   is_replay BOOLEAN,
+  source TEXT CHECK (source IN ('OCR', 'METADATA')) NOT NULL DEFAULT 'OCR',
+  dismissal_type TEXT CHECK (
+    dismissal_type IN ('BOWLED', 'CAUGHT', 'LBW', 'RUN_OUT', 'STUMPED', 'HIT_WICKET')
+    OR dismissal_type IS NULL
+  ),
+  fielder TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -84,6 +96,31 @@ CREATE TABLE scoreboard_readings (
 );
 
 CREATE INDEX idx_scoreboard_readings_timestamp ON scoreboard_readings (timestamp_seconds);
+
+-- specs/013-match-metadata-validation/data-model.md: an append-only audit
+-- trail for every Recovery/Enrichment operation this feature performs --
+-- written only by INSERT (never UPDATE/DELETE), so "what was added/changed,
+-- when, from which metadata source" is always answerable from within the
+-- database itself, with no dependency on external logs (research.md
+-- Decision 5). The unique index is defense-in-depth for idempotency
+-- (FR-012) -- the real check is an explicit pre-write query
+-- (research.md Decision 6), not reliance on a constraint-violation catch.
+CREATE TABLE metadata_operations (
+  operation_id INTEGER PRIMARY KEY,
+  operation_type TEXT CHECK (operation_type IN ('RECOVERY', 'ENRICHMENT')),
+  metadata_file_path TEXT NOT NULL,
+  metadata_file_hash TEXT NOT NULL,
+  metadata_event_identifier TEXT NOT NULL,
+  affected_event_id INTEGER,
+  recovery_version TEXT NOT NULL,
+  performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  detail TEXT
+);
+
+CREATE UNIQUE INDEX idx_metadata_operations_dedup
+  ON metadata_operations (metadata_file_hash, metadata_event_identifier, operation_type);
+
+CREATE INDEX idx_metadata_operations_event ON metadata_operations (affected_event_id);
 """
 
 

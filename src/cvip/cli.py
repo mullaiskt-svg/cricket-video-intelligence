@@ -20,7 +20,7 @@ import yaml
 
 from cvip import orchestrator
 from cvip.orchestrator_errors import OrchestratorError, OrchestratorFailureReason
-from cvip.orchestrator_models import AnalyzeRequest, GenerateRequest
+from cvip.orchestrator_models import AnalyzeRequest, GenerateRequest, ValidateRequest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     inspect_parser = subparsers.add_parser("inspect-db")
     inspect_parser.add_argument("db_path")
+
+    validate_parser = subparsers.add_parser("validate")
+    validate_parser.add_argument("match_id_or_db_path")
+    validate_parser.add_argument("--metadata", required=True)
+    validate_parser.add_argument("--recover", action="store_true")
+    validate_parser.add_argument("--enrich", action="store_true")
+    validate_parser.add_argument("--output")
 
     subparsers.add_parser("doctor")
 
@@ -164,6 +171,53 @@ def _run_export_timeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_validate(args: argparse.Namespace) -> int:
+    match_id, db_path = _resolve_match_id_and_db_path(args.match_id_or_db_path)
+    request = ValidateRequest(
+        db_path=db_path,
+        metadata_path=args.metadata,
+        recover=args.recover,
+        enrich=args.enrich,
+        output_path=args.output,
+    )
+    result = orchestrator.validate(request)
+    report = result.report
+
+    payload = {
+        "match_id": match_id,
+        "ground_truth_total": report.ground_truth_total,
+        "true_positives": report.true_positives,
+        "false_negatives_no_signal": report.false_negatives_no_signal,
+        "false_negatives_with_signal": report.false_negatives_with_signal,
+        "false_positives": report.false_positives,
+        "recall_by_event_type": report.recall_by_event_type,
+        "precision": report.precision,
+        "missed_events": [
+            {
+                "innings": event.innings,
+                "over_number": event.over_number,
+                "ball_in_over": event.ball_in_over,
+                "event_type": event.event_type,
+                "description": event.description,
+                "outcome": outcome,
+            }
+            for event, outcome in report.missed_events
+        ],
+    }
+    text = json.dumps(payload, indent=2)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(text)
+    else:
+        print(text)
+
+    if args.recover:
+        print(f"recovered={result.recovered_count} skipped={result.skipped_recovery_count}")
+    if args.enrich:
+        print(f"enriched={result.enriched_count}")
+    return 0
+
+
 def _run_inspect_db(args: argparse.Namespace) -> int:
     summary = orchestrator.inspect_db(args.db_path)
     print(f"Match ID: {summary.match_id}")
@@ -200,6 +254,7 @@ _HANDLERS = {
     "generate": _run_generate,
     "export-timeline": _run_export_timeline,
     "inspect-db": _run_inspect_db,
+    "validate": _run_validate,
     "doctor": _run_doctor,
 }
 

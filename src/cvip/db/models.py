@@ -93,6 +93,21 @@ class EventLike(Protocol):
     is_replay: bool
 
 
+class RecoveredEventLike(Protocol):
+    """Structural shape `persist_recovered_event()` accepts
+    (specs/013-match-metadata-validation/) -- matches
+    `cvip.metadata.recovery_models.RecoveredEvent` by field, not by import,
+    the same structural-typing precedent every other `*Like` Protocol here
+    already establishes (research.md Decision 8)."""
+
+    event_type: str
+    timestamp_seconds: float
+    innings: int
+    over_number: int
+    ball_in_over: int
+    confidence: float
+
+
 @dataclass(frozen=True)
 class EventQueryFilter:
     """The caller-supplied combination of criteria for `query_events()`

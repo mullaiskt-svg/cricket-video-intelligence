@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from cvip.metadata.validation_models import AccuracyReport
+
 
 @dataclass(frozen=True)
 class AnalyzeRequest:
@@ -73,6 +75,33 @@ class GenerateResult:
     output_path: str
     clip_count: int
     event_count: int
+
+
+@dataclass(frozen=True)
+class ValidateRequest:
+    """Built by cli.py from parsed argparse output; passed to
+    orchestrator.validate() (specs/013-match-metadata-validation/).
+    `db_path` is already resolved by cli.py's existing
+    `_resolve_match_id_and_db_path` -- this module never re-implements
+    match_id/db_path resolution itself."""
+
+    db_path: str
+    metadata_path: str
+    recover: bool = False
+    enrich: bool = False
+    output_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ValidateResult:
+    """The result orchestrator.validate() returns on success. `report` is
+    always populated (Stage 3 always runs); `recovered_count`/
+    `enriched_count` are 0 unless `--recover`/`--enrich` were requested."""
+
+    report: AccuracyReport
+    recovered_count: int = 0
+    skipped_recovery_count: int = 0
+    enriched_count: int = 0
 
 
 @dataclass(frozen=True)

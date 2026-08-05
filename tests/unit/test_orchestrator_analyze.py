@@ -441,26 +441,53 @@ def test_database_error_during_status_check_maps_to_database_failure(mocker, tmp
     scene_mock.assert_not_called()
 
 
+class _S:
+    def __init__(self, runs, wickets):
+        self.timestamp_seconds = 0.0
+        self.over_number = 1
+        self.ball_in_over = 1
+        self.runs = runs
+        self.wickets = wickets
+        self.batter = None
+        self.non_striker = None
+        self.bowler = None
+        self.run_rate = None
+        self.raw_text = ""
+        self.ocr_confidence = 1.0
+        self.parse_confidence = 1.0
+
+
 def test_tag_readings_with_innings_increments_on_genuine_transition():
     from cvip.orchestrator import _tag_readings_with_innings
-
-    class _S:
-        def __init__(self, runs, wickets):
-            self.timestamp_seconds = 0.0
-            self.over_number = 1
-            self.ball_in_over = 1
-            self.runs = runs
-            self.wickets = wickets
-            self.batter = None
-            self.non_striker = None
-            self.bowler = None
-            self.run_rate = None
-            self.raw_text = ""
-            self.ocr_confidence = 1.0
-            self.parse_confidence = 1.0
 
     samples = [_S(150, 8), _S(180, 8), _S(2, 0), _S(10, 0)]  # a genuine innings transition
 
     tagged = orchestrator._tag_readings_with_innings(samples)
 
     assert [t.innings for t in tagged] == [1, 1, 2, 2]
+
+
+def test_tag_readings_with_innings_ignores_mid_innings_ocr_noise():
+    # PLATINUM CUP FINAL bug: simultaneous small decreases (147→143, 5→3)
+    # are OCR noise, not an innings break -- new runs must be near zero.
+    from cvip.orchestrator import _tag_readings_with_innings
+
+    samples = [_S(100, 2), _S(147, 5), _S(143, 3), _S(150, 5)]
+
+    tagged = orchestrator._tag_readings_with_innings(samples)
+
+    assert all(t.innings == 1 for t in tagged)
+
+
+def test_tag_readings_with_innings_boundary_at_threshold():
+    from cvip.orchestrator import _NEW_INNINGS_MAX_RUNS, _tag_readings_with_innings
+
+    # Exactly at threshold (not below) → still innings 1
+    samples = [_S(100, 5), _S(_NEW_INNINGS_MAX_RUNS, 0)]
+    tagged = orchestrator._tag_readings_with_innings(samples)
+    assert all(t.innings == 1 for t in tagged)
+
+    # One below threshold → innings 2
+    samples = [_S(100, 5), _S(_NEW_INNINGS_MAX_RUNS - 1, 0)]
+    tagged = orchestrator._tag_readings_with_innings(samples)
+    assert [t.innings for t in tagged] == [1, 2]

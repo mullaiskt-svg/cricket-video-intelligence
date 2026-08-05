@@ -30,6 +30,7 @@ from cvip.db.models import (
     MatchSummary,
     MatchTimelineExport,
     QueriedEvent,
+    RecoveredEventLike,
     ReplaySegmentLike,
     ScoreboardReadingLike,
 )
@@ -517,6 +518,139 @@ class EventDatabase:
             replay_count=replay_count,
             event_counts_by_type=counts_by_type,
             average_confidence_by_type=avg_confidence_by_type,
+        )
+
+    # -- Capability 4: metadata recovery/enrichment writes
+    # (specs/013-match-metadata-validation/) -----------------------------
+
+    def has_metadata_operation(
+        self, metadata_file_hash: str, metadata_event_identifier: str, operation_type: str
+    ) -> bool:
+        """FR-012: the idempotency pre-check (research.md Decision 6) --
+        True if a RECOVERY/ENRICHMENT operation for this exact
+        (metadata_file_hash, metadata_event_identifier) pair has already
+        been recorded. Pure read -- no diagnostics record."""
+        row = self._conn.execute(
+            "SELECT 1 FROM metadata_operations "
+            "WHERE metadata_file_hash = ? AND metadata_event_identifier = ? AND operation_type = ?",
+            (metadata_file_hash, metadata_event_identifier, operation_type),
+        ).fetchone()
+        return row is not None
+
+    def persist_recovered_event(
+        self,
+        event: RecoveredEventLike,
+        metadata_file_path: str,
+        metadata_file_hash: str,
+        metadata_event_identifier: str,
+        recovery_version: str,
+    ) -> int:
+        """specs/013-match-metadata-validation/contracts/metadata_pipeline_contract.md
+        Stage 5: inserts a new `events` row (`source='METADATA'`) and its
+        matching `metadata_operations` audit row (`operation_type='RECOVERY'`)
+        in one transaction -- both succeed or both roll back together
+        (data-model.md; never a recovered event with no audit trail, or
+        vice versa). Returns the new `event_id`. Deliberately NOT gated by
+        `_check_write_allowed` -- recovery is meant to run precisely when
+        the match IS COMPLETE (matching `update_clip_window`'s own
+        established precedent), never against an in-progress analysis."""
+
+        new_event_id: List[Optional[int]] = [None]
+
+        def work() -> Tuple[str, None]:
+            cursor = self._conn.execute(
+                "INSERT INTO events (timestamp_seconds, innings, over_number, ball_in_over, "
+                "event_type, confidence, is_replay, source) VALUES (?,?,?,?,?,?,?, 'METADATA')",
+                (
+                    event.timestamp_seconds,
+                    event.innings,
+                    event.over_number,
+                    event.ball_in_over,
+                    event.event_type,
+                    event.confidence,
+                    False,
+                ),
+            )
+            event_id = cursor.lastrowid
+            self._insert_metadata_operation(
+                operation_type="RECOVERY",
+                metadata_file_path=metadata_file_path,
+                metadata_file_hash=metadata_file_hash,
+                metadata_event_identifier=metadata_event_identifier,
+                affected_event_id=event_id,
+                recovery_version=recovery_version,
+                detail=f"recovered {event.event_type} at t={event.timestamp_seconds}s",
+            )
+            self._conn.commit()
+            new_event_id[0] = event_id
+            return f"event_id={event_id}", None
+
+        self._run_operation(
+            "persist_recovered_event", f"metadata_event_identifier={metadata_event_identifier}", work
+        )
+        return new_event_id[0]
+
+    def update_dismissal_detail(
+        self,
+        event_id: int,
+        dismissal_type: Optional[str],
+        fielder: Optional[str],
+        metadata_file_path: str,
+        metadata_file_hash: str,
+        metadata_event_identifier: str,
+        recovery_version: str,
+    ) -> None:
+        """specs/013-match-metadata-validation/contracts/metadata_pipeline_contract.md
+        Stage 6: updates only `dismissal_type`/`fielder` on an existing
+        `events` row and inserts a matching `metadata_operations` audit row
+        (`operation_type='ENRICHMENT'`) in one transaction. Never touches
+        `timestamp_seconds`/`confidence`/`event_type`/any other column."""
+
+        def work() -> Tuple[str, None]:
+            self._conn.execute(
+                "UPDATE events SET dismissal_type = ?, fielder = ? WHERE event_id = ?",
+                (dismissal_type, fielder, event_id),
+            )
+            self._insert_metadata_operation(
+                operation_type="ENRICHMENT",
+                metadata_file_path=metadata_file_path,
+                metadata_file_hash=metadata_file_hash,
+                metadata_event_identifier=metadata_event_identifier,
+                affected_event_id=event_id,
+                recovery_version=recovery_version,
+                detail=f"dismissal_type={dismissal_type} fielder={fielder}",
+            )
+            self._conn.commit()
+            return f"event_id={event_id} dismissal_type={dismissal_type}", None
+
+        self._run_operation("update_dismissal_detail", f"event_id={event_id}", work)
+
+    def _insert_metadata_operation(
+        self,
+        operation_type: str,
+        metadata_file_path: str,
+        metadata_file_hash: str,
+        metadata_event_identifier: str,
+        affected_event_id: Optional[int],
+        recovery_version: str,
+        detail: str,
+    ) -> None:
+        """Shared by persist_recovered_event/update_dismissal_detail --
+        always called from within their own work() closure, so it shares
+        the caller's transaction rather than committing independently
+        (data-model.md's "both succeed or both roll back together")."""
+        self._conn.execute(
+            "INSERT INTO metadata_operations (operation_type, metadata_file_path, metadata_file_hash, "
+            "metadata_event_identifier, affected_event_id, recovery_version, detail) VALUES (?,?,?,?,?,?,?)",
+            (
+                operation_type,
+                metadata_file_path,
+                metadata_file_hash,
+                metadata_event_identifier,
+                affected_event_id,
+                recovery_version,
+                detail,
+            ),
         )
 
     def get_match_timeline(self) -> MatchTimelineExport:

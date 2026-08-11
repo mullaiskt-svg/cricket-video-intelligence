@@ -10,12 +10,14 @@ from cvip.orchestrator_errors import OrchestratorError, OrchestratorFailureReaso
 from cvip.orchestrator_models import ValidateResult
 
 
-def _report(missed=()):
-    return AccuracyReport(
+def _report(missed=(), **overrides):
+    fields = dict(
         ground_truth_total=1, true_positives=1, false_negatives_no_signal=0,
         false_negatives_with_signal=0, false_positives=0,
         recall_by_event_type={"FOUR": 1.0}, precision=1.0, missed_events=missed,
     )
+    fields.update(overrides)
+    return AccuracyReport(**fields)
 
 
 def test_validate_requires_metadata_flag():
@@ -111,6 +113,54 @@ def test_validate_orchestrator_error_translates_to_exit_code(mocker):
     exit_code = cli.main(["validate", "my_match", "--metadata", "meta.json"])
 
     assert exit_code == 2
+
+
+def test_validate_prints_the_run_level_tier_summary(mocker, capsys):
+    """specs/014-anchor-validation User Story 3."""
+    mocker.patch(
+        "cvip.orchestrator.validate",
+        return_value=ValidateResult(
+            report=_report(
+                anchored_high_confidence=5, anchored_medium_confidence=2,
+                anchored_low_confidence=1, unresolved_count=3,
+                ordering_violations_detected=2, ordering_violations_prevented=1,
+            )
+        ),
+    )
+
+    cli.main(["validate", "my_match", "--metadata", "meta.json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["anchored_high_confidence"] == 5
+    assert payload["anchored_medium_confidence"] == 2
+    assert payload["anchored_low_confidence"] == 1
+    assert payload["unresolved_count"] == 3
+    assert payload["ordering_violations_detected"] == 2
+    assert payload["ordering_violations_prevented"] == 1
+
+
+def test_validate_prints_per_event_validation_detail_for_rejected_events(mocker, capsys):
+    """specs/014-anchor-validation User Story 2."""
+    detail = (
+        (
+            MetadataEvent(innings=1, over_number=1, ball_in_over=0, event_type="FOUR", description="d"),
+            "UNRESOLVED",
+            "ocr_quality=INSUFFICIENT(0.10) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN",
+        ),
+    )
+    mocker.patch(
+        "cvip.orchestrator.validate",
+        return_value=ValidateResult(report=_report(validation_detail=detail)),
+    )
+
+    cli.main(["validate", "my_match", "--metadata", "meta.json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["validation_detail"]) == 1
+    entry = payload["validation_detail"][0]
+    assert entry["event_type"] == "FOUR"
+    assert entry["validation_tier"] == "UNRESOLVED"
+    assert "ocr_quality=INSUFFICIENT" in entry["reason"]
 
 
 def test_validate_accepts_a_direct_db_path_instead_of_a_bare_match_id(mocker):

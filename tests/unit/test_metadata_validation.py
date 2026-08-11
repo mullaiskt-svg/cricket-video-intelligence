@@ -1,6 +1,9 @@
 """Unit tests for src/cvip/metadata/validation.py's AccuracyReport
-construction (T024, FR-006, FR-007)."""
+construction (T024, FR-006, FR-007), plus specs/014-anchor-validation's
+User Story 2/3 additions (per-event validation detail, run-level tier
+summary)."""
 
+from cvip.metadata.alignment import align
 from cvip.metadata.alignment_models import AlignmentConfidenceTier, AlignmentOutcome, MatchAlignmentEvidence
 from cvip.metadata.extraction_models import MetadataEvent
 from cvip.metadata.validation import analyze_accuracy
@@ -85,3 +88,75 @@ def test_missed_events_carries_the_metadata_event_and_its_outcome():
     outcomes = {outcome for _, outcome in report.missed_events}
     assert outcomes == {"RECOVERABLE_MISS", "UNRECOVERABLE_MISS"}
     assert len(report.missed_events) == 2
+
+
+# --- specs/014-anchor-validation: tier-breakdown / validation-detail additions ---
+
+def test_tier_breakdown_counts_sum_to_ground_truth_total():
+    ground_truth = [
+        MetadataEvent(innings=1, over_number=1, ball_in_over=0, event_type="FOUR", description="a"),
+        MetadataEvent(innings=1, over_number=2, ball_in_over=0, event_type="FOUR", description="b"),
+    ]
+    readings = [
+        {"innings": 1, "over_number": 1, "ball_in_over": 0, "timestamp_seconds": 100.0, "parse_confidence": 1.0, "ocr_confidence": 0.9},
+        {"innings": 1, "over_number": 2, "ball_in_over": 0, "timestamp_seconds": 50.0, "parse_confidence": 1.0, "ocr_confidence": 0.9},
+    ]
+    alignment = align(ground_truth, readings, [])
+
+    report = analyze_accuracy(alignment, detected_events=[])
+
+    assert (
+        report.anchored_high_confidence
+        + report.anchored_medium_confidence
+        + report.anchored_low_confidence
+        + report.unresolved_count
+        == report.ground_truth_total
+        == 2
+    )
+
+
+def test_unresolved_count_is_distinct_from_false_negatives_no_signal():
+    """A candidate reading was FOUND (so this is not a no-signal case) but
+    OCR quality is too low to trust -- false_negatives_no_signal stays 0
+    (013's original meaning: "no reading found anywhere nearby"), while
+    unresolved_count correctly flags it as untrustworthy."""
+    ground_truth = [MetadataEvent(innings=1, over_number=1, ball_in_over=0, event_type="FOUR", description="a")]
+    readings = [
+        {"innings": 1, "over_number": 1, "ball_in_over": 0, "timestamp_seconds": 100.0, "parse_confidence": 1.0, "ocr_confidence": 0.05}
+    ]
+    alignment = align(ground_truth, readings, [])
+
+    report = analyze_accuracy(alignment, detected_events=[])
+
+    assert report.false_negatives_no_signal == 0
+    assert report.false_negatives_with_signal == 1
+    assert report.unresolved_count == 1
+
+
+def test_validation_detail_reports_a_reason_for_an_unresolved_event():
+    ground_truth = [MetadataEvent(innings=1, over_number=1, ball_in_over=0, event_type="FOUR", description="a")]
+    readings = [
+        {"innings": 1, "over_number": 1, "ball_in_over": 0, "timestamp_seconds": 100.0, "parse_confidence": 1.0, "ocr_confidence": 0.05}
+    ]
+    alignment = align(ground_truth, readings, [])
+
+    report = analyze_accuracy(alignment, detected_events=[])
+
+    assert len(report.validation_detail) == 1
+    event, tier, reason = report.validation_detail[0]
+    assert event == ground_truth[0]
+    assert tier == "UNRESOLVED"
+    assert "ocr_quality=INSUFFICIENT" in reason
+
+
+def test_validation_detail_omits_high_and_medium_confidence_events():
+    ground_truth = [MetadataEvent(innings=1, over_number=1, ball_in_over=0, event_type="FOUR", description="a")]
+    readings = [
+        {"innings": 1, "over_number": 1, "ball_in_over": 0, "timestamp_seconds": 100.0, "parse_confidence": 1.0, "ocr_confidence": 0.9}
+    ]
+    alignment = align(ground_truth, readings, [])
+
+    report = analyze_accuracy(alignment, detected_events=[])
+
+    assert report.validation_detail == ()
+    assert report.anchored_high_confidence == 1

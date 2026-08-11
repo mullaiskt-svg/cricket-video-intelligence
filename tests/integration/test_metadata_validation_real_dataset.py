@@ -24,6 +24,9 @@ import os
 
 from cvip.db.database import open_database
 from cvip.db.models import MatchMetadata
+from cvip.metadata.alignment import align
+from cvip.metadata.anchor_validation_models import AnchorConfidenceTier
+from cvip.metadata.extraction import extract_ground_truth
 from cvip.orchestrator import validate
 from cvip.orchestrator_models import ValidateRequest
 
@@ -98,6 +101,68 @@ def _build_combined_metadata_file(tmp_path):
     path = tmp_path / "combined_metadata.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return str(path)
+
+
+def _load_reading_dicts():
+    """Same source CSV as `_load_readings()`, as plain dicts -- `align()`'s
+    own `_build_reading_indices`/`_check_positions_in_range` are dict-only
+    (unlike anchor_validation.py's `_reading_get`, which also accepts
+    structural objects), so a direct `align()` call needs dicts."""
+    path = os.path.join(REPO_ROOT, "third_match_raw_ocr_v2.csv")
+    with open(path, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    readings = []
+    for row in rows:
+        ts = float(row["timestamp"])
+        readings.append(
+            {
+                "innings": 1 if ts < INNINGS_TRANSITION_TS else 2,
+                "over_number": int(row["over"]) if row["over"] else None,
+                "ball_in_over": int(row["ball"]) if row["ball"] else None,
+                "timestamp_seconds": ts,
+                "runs": int(row["runs"]) if row["runs"] else None,
+                "wickets": int(row["wickets"]) if row["wickets"] else None,
+                "ocr_confidence": float(row["ocr_conf"]) if row["ocr_conf"] else 0.0,
+                "parse_confidence": float(row["parse_conf"]) if row["parse_conf"] else 0.0,
+            }
+        )
+    return readings
+
+
+def test_recovery_eligible_events_preserve_chronological_order_on_real_data(tmp_path):
+    """specs/014-anchor-validation's own originating bug, reproduced and
+    proven fixed directly against the real Wild Wanderers vs Phoenix
+    Firehawks match data: before Anchor Validation existed, 6 of 33
+    metadata-recovered events on this exact match were accepted out of
+    chronological order (documented in that feature's spec.md). Every
+    event now eligible for automatic recovery (HIGH/MEDIUM confidence)
+    must be in strictly non-decreasing timestamp order within its innings,
+    in over.ball order (spec SC-002)."""
+    metadata_path = _build_combined_metadata_file(tmp_path)
+    ground_truth = extract_ground_truth(metadata_path)
+    readings = _load_reading_dicts()
+
+    evidence = align(ground_truth, readings, [])
+
+    by_innings = {}
+    for item in evidence:
+        if item.validation_tier in (AnchorConfidenceTier.HIGH, AnchorConfidenceTier.MEDIUM):
+            key = item.metadata_event.innings
+            by_innings.setdefault(key, []).append(
+                (
+                    item.metadata_event.over_number,
+                    item.metadata_event.ball_in_over,
+                    item.matched_scoreboard_reading["timestamp_seconds"],
+                )
+            )
+
+    assert by_innings, "expected at least one recovery-eligible event to check ordering on"
+    for innings, items in by_innings.items():
+        ordered_by_ball = sorted(items, key=lambda t: (t[0], t[1]))
+        timestamps = [t[2] for t in ordered_by_ball]
+        assert timestamps == sorted(timestamps), (
+            f"innings {innings}: recovery-eligible events are not in chronological order: {ordered_by_ball}"
+        )
 
 
 def test_validate_reproduces_the_established_recall_figure_on_real_data(tmp_path):

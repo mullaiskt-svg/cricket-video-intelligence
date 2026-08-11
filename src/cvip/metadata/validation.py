@@ -20,6 +20,8 @@ from __future__ import annotations
 from typing import Sequence
 
 from cvip.metadata.alignment_models import AlignmentOutcome, MatchAlignmentEvidence
+from cvip.metadata.anchor_validation import summarize
+from cvip.metadata.anchor_validation_models import AnchorConfidenceTier
 from cvip.metadata.validation_models import AccuracyReport
 
 _SCORING_EVENT_TYPES = ("FOUR", "SIX", "WICKET")
@@ -57,6 +59,23 @@ def analyze_accuracy(
         (item.metadata_event, item.outcome.value) for item in (no_signal + with_signal)
     )
 
+    # specs/014-anchor-validation, User Stories 2-3: the run-level trust
+    # summary (from the shared engine's own summarize()) plus, for every
+    # event that is NOT automatically recovery-eligible, the best-tried
+    # candidate's diagnostic reason -- distinguishing "no signal was ever
+    # found" (validation_signals is None) from "signal existed but wasn't
+    # trustworthy enough" (validation_signals is populated).
+    summary = summarize(alignment)
+    validation_detail = tuple(
+        (
+            item.metadata_event,
+            item.validation_tier.value if item.validation_tier else AnchorConfidenceTier.UNRESOLVED.value,
+            item.validation_signals.reason if item.validation_signals else "no candidate reading found nearby",
+        )
+        for item in alignment
+        if item.validation_tier in (None, AnchorConfidenceTier.LOW, AnchorConfidenceTier.UNRESOLVED)
+    )
+
     return AccuracyReport(
         ground_truth_total=len(alignment),
         true_positives=true_positives,
@@ -66,4 +85,11 @@ def analyze_accuracy(
         recall_by_event_type=recall_by_event_type,
         precision=precision,
         missed_events=missed_events,
+        anchored_high_confidence=summary.anchored_high_confidence,
+        anchored_medium_confidence=summary.anchored_medium_confidence,
+        anchored_low_confidence=summary.anchored_low_confidence,
+        unresolved_count=summary.unresolved_count,
+        ordering_violations_detected=summary.ordering_violations_detected,
+        ordering_violations_prevented=summary.ordering_violations_prevented,
+        validation_detail=validation_detail,
     )

@@ -18,9 +18,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from cvip.metadata.extraction_models import MetadataEvent
+
+if TYPE_CHECKING:
+    # Typing-only: avoids a real circular import, since
+    # anchor_validation_models.py itself imports AlignmentConfidenceTier
+    # from this file (one-directional at runtime). `from __future__ import
+    # annotations` (above) already makes every annotation in this module a
+    # lazy string, so this guard is what keeps the import from also being
+    # evaluated eagerly.
+    from cvip.metadata.anchor_validation_models import (
+        AnchorConfidenceTier,
+        AnchorValidationSignals,
+        RejectedCandidate,
+    )
 
 
 class AlignmentConfidenceTier(str, Enum):
@@ -50,7 +63,15 @@ class MatchAlignmentEvidence:
     `cvip.db.models.ScoreboardReadingLike`/`EventLike` fields), not a hard
     import of a specific upstream dataclass, per this platform's own
     established structural-typing precedent (`specs/010-event-database/
-    research.md` Decision 8)."""
+    research.md` Decision 8).
+
+    Extended by specs/014-anchor-validation (see that feature's
+    data-model.md "Changed Entities") with `validation_tier`,
+    `validation_signals`, `rejected_candidates` -- additive only, every
+    013-era field keeps its original meaning except `recovery_eligible`,
+    whose *value* now also depends on `validation_tier` (its name/type are
+    unchanged, so `recovery.py`'s `find_recovery_candidates()` -- a pure
+    filter on this one field -- required no code change at all)."""
 
     metadata_event: MetadataEvent
     matched_scoreboard_reading: Optional[object]
@@ -59,3 +80,16 @@ class MatchAlignmentEvidence:
     outcome: AlignmentOutcome
     recovery_eligible: bool
     reason: str
+    # Defaulted (unlike every field above) so pre-014 call sites across the
+    # test suite that build a MatchAlignmentEvidence directly -- to exercise
+    # recovery.py/enrichment.py/validation.py's own logic, none of which
+    # reads these three fields -- don't need touching. `align()` itself
+    # always supplies all three explicitly (alignment.py's `_build_evidence`).
+    # `validation_tier` defaults to `None` rather than a real
+    # `AnchorConfidenceTier` member because that enum can only be imported
+    # under `TYPE_CHECKING` here (see the module-level comment above) --
+    # importing it for real to use as a default would reintroduce the
+    # circular import this file otherwise avoids.
+    validation_tier: Optional["AnchorConfidenceTier"] = None
+    validation_signals: Optional["AnchorValidationSignals"] = None
+    rejected_candidates: Tuple["RejectedCandidate", ...] = ()

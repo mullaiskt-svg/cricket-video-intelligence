@@ -73,6 +73,10 @@ specs/tasks.md
 specs/coverage.md
 specs/quality.md
 
+# Manual pre-change backups (e.g. foo.mp4.bak-pre-recalibration) -- scratch
+# copies kept locally while hand-validating a recalibration, not deliverables.
+*.bak-*
+
 # One-off investigation/experiment scripts and their output (not shipped code)
 /ground_truth_v2/
 /ground_truth_scores.py

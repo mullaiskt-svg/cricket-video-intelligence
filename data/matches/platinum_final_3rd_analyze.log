@@ -1,0 +1,155 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260806082727
+Username: AARNA\mulla
+RunAs User: AARNA\mulla
+Configuration Name: 
+Machine: AARNA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; cd d:\mywork\projects\cricket-video-intelligence; $env:PATH = "C:\Users\mulla\AppData\Local\Python\pythoncore-3.14-64\Scripts;" + $env:PATH; Start-Transcript -Path "data\matches\platinum_final_3rd_analyze.log" -Force; cvip analyze "D:\Mullai-20231003T001727Z-001\WW\WW Matches\PLATINUM_FINAL_3rd_h264.mp4" --output-db data/matches/platinum_final_3rd.sqlite 2>&1; Stop-Transcript
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath 'C:\Users\mulla\AppData\Local\Temp\claude\claude-pwd-ps-f9d6' -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }
+Process ID: 26236
+PSVersion: 5.1.26100.8875
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8875
+BuildVersion: 10.0.26100.8875
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is data\matches\platinum_final_3rd_analyze.log
+cvip : 2026-08-06 08:27:33.364 | INFO     | cvip.orchestrator:analyze:179 - analyze: starting for
+D:\Mullai-20231003T001727Z-001\WW\WW Matches\PLATINUM_FINAL_3rd_h264.mp4
+At line:1 char:520
++ ... og" -Force; cvip analyze "D:\Mullai-20231003T001727Z-001\WW\WW Matche ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-08-06 08:2...AL_3rd_h264.mp4:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+2026-08-06 08:27:33.819 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "video",
+"start_time": "2026-08-06T08:27:33.366096", "end_time": "2026-08-06T08:27:33.819201", "duration_seconds":
+0.4530997001565993, "peak_memory_mb": 95.1171875, "input_summary": "D:\\Mullai-20231003T001727Z-001\\WW\\WW
+Matches\\PLATINUM_FINAL_3rd_h264.mp4", "output_summary": "duration=8393.4s resolution=(1280, 720) fps=30.0
+codec=h264", "warnings": [], "failure_reason": null}
+2026-08-06 08:27:33.819 | INFO     | cvip.video.loader:load_video:44 - load_video succeeded:
+D:\Mullai-20231003T001727Z-001\WW\WW Matches\PLATINUM_FINAL_3rd_h264.mp4
+2026-08-06 08:27:33.819 | INFO     | cvip.orchestrator:analyze:195 - analyze: video_loader OK
+(file_hash=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1)
+2026-08-06 08:27:33.869 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T08:27:33.869716", "end_time": "2026-08-06T08:27:33.869772", "duration_seconds":
+4.8999907448887825e-05, "peak_memory_mb": 95.85546875, "input_summary": "operation=open_database
+path=data\\matches\\platinum_final_3rd.sqlite existed=False", "output_summary": "schema_created=True schema_version=2
+schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 08:27:33.876 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T08:27:33.873247", "end_time": "2026-08-06T08:27:33.876415", "duration_seconds":
+0.0031594999600201845, "peak_memory_mb": 95.890625, "input_summary": "operation=begin_analysis
+file_hash=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1", "output_summary": "status=IN_PROGRESS
+schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 08:27:33.876 | INFO     | cvip.orchestrator:_run_scene_detection:298 - analyze: scene_detection starting
+2026-08-06 11:02:59.354 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.frame_extraction", "start_time": "2026-08-06T08:27:33.876999", "end_time": "2026-08-06T11:02:59.328935",
+"duration_seconds": 9325.449620800093, "peak_memory_mb": 95.890625, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 mode=FULL", "output_summary":
+"frames_yielded=251802 video_time_covered=8393.366666666667s", "warnings": [], "failure_reason": null}
+2026-08-06 11:02:59.377 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.scene_detection", "start_time": "2026-08-06T08:27:33.876895", "end_time": "2026-08-06T11:02:59.375012",
+"duration_seconds": 9325.498110899935, "peak_memory_mb": 95.890625, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 scene_threshold=8.0",
+"output_summary": "frames_analyzed=251802 boundaries_detected=451 replay_transitions=123", "warnings": [],
+"failure_reason": null}
+2026-08-06 11:02:59.404 | INFO     | cvip.orchestrator:_run_scene_detection:308 - analyze: scene_detection OK (451
+boundaries)
+2026-08-06 11:02:59.405 | INFO     | cvip.orchestrator:_run_replay_detection:313 - analyze: replay_detection starting
+2026-08-06 11:47:24.875 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.frame_extraction", "start_time": "2026-08-06T11:02:59.419109", "end_time": "2026-08-06T11:47:24.873135",
+"duration_seconds": 2665.4540118000004, "peak_memory_mb": 37.29296875, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 mode=FIXED_INTERVAL rate_fps=1.0",
+"output_summary": "frames_yielded=8394 video_time_covered=8393.0s", "warnings": [], "failure_reason": null}
+2026-08-06 11:47:24.880 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.replay_detection", "start_time": "2026-08-06T11:02:59.412789", "end_time": "2026-08-06T11:47:24.879929",
+"duration_seconds": 2665.467131700134, "peak_memory_mb": 37.375, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 weights=(0.15,0.25,0.25,0.2,0.15)
+threshold=0.5 min_segment_seconds=3", "output_summary": "candidate_segments_evaluated=452 replay_segments_accepted=2
+replay_segments_rejected=450 average_confidence=0.5338944552950886 highest_confidence=0.5619946920929998
+longest_replay_duration=54.0 total_replay_duration=59.40000000000009 sampling_rate_used=1.0 frames_analyzed=8394",
+"warnings": [], "failure_reason": null}
+2026-08-06 11:47:24.885 | INFO     | cvip.orchestrator:_run_replay_detection:334 - analyze: replay_detection OK (2
+segments)
+2026-08-06 11:47:24.907 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T11:47:24.888545", "end_time": "2026-08-06T11:47:24.906789", "duration_seconds":
+0.018236099975183606, "peak_memory_mb": 32.79296875, "input_summary": "operation=persist_replays batch_size=2",
+"output_summary": "rows_written=2 schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 11:47:24.909 | INFO     | cvip.orchestrator:_run_scoreboard_ocr:339 - analyze: scoreboard_ocr starting
+2026-08-06 13:04:17.246 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.frame_extraction", "start_time": "2026-08-06T11:47:24.920870", "end_time": "2026-08-06T13:04:17.237175",
+"duration_seconds": 4612.314002199797, "peak_memory_mb": 662.7421875, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 mode=FIXED_INTERVAL rate_fps=1.0",
+"output_summary": "frames_yielded=8394 video_time_covered=8393.0s", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:17.271 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.scoreboard_ocr", "start_time": "2026-08-06T11:47:24.917667", "end_time": "2026-08-06T13:04:17.252397",
+"duration_seconds": 4612.334720800165, "peak_memory_mb": 663.88671875, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 scoreboard_region=(0.05, 0.82, 0.9,
+0.15) preprocess=(grayscale=True,threshold=True,upscale=2) min_confidence=0.7 parser_registry=(club_broadcast: A
+single, fused compound score token '{runs}-{wickets}/{over}.{ball}({total_overs})' (e.g. '0-0/0.0(20)'), no
+'B:'/'BOWLER:' label, no striker asterisk -- batter/non-striker/bowler names associated by adjacency to their own
+runs-and-balls or wickets-runs-and-overs stats marker instead.; separate_token_broadcast: A bare '{runs}-{wickets}'
+score token (e.g. '12-0'), separate from a bare '{over}.{ball}' token immediately followed by its own
+'({total_overs})' token (e.g. '1.0' '(20)') -- unlike GenericBroadcastParser's '/'-separated tokens or
+ClubBroadcastParser's single fused compound token. Batter/non-striker are not extracted (known limitation: that screen
+region produced unrecognizable OCR noise across every sample examined during this parser's design); bowler and current
+run rate are extracted on a best-effort basis.; generic_broadcast: Clean, separately-tokenized 'runs/wickets' (e.g.
+'125/3') and 'over.ball' (e.g. '12.3') tokens, a 'B:'/'BOWLER:' label preceding the bowler's name, and a trailing '*'
+marking the striker. Matches unconditionally -- the universal fallback for any reading no more specific parser
+claims.)", "output_summary": "frames_processed=8394 undetectable_region_count=307
+average_ocr_confidence=0.48939089345997916 low_ocr_confidence_count=7759 average_parse_confidence=0.5061949011198476
+parse_confidence_zero_count=3838 validation_failure_breakdown=(INVALID_BALL_NUMBER=656, INVALID_OVER_SEQUENCE=56,
+PLAYER_PARSE_FAILED=2869, RUNS_DECREASED=242, WICKETS_DECREASED=15) roi_unchanged_skip_count=1000
+parser_strategy=(club_broadcast=4467, generic_broadcast=3594, separate_token_broadcast=26)
+generic_broadcast_unparsed_count=2869 preprocessing_strategy_locked=otsu_threshold preprocessing_warmup_samples=0
+configuration_version=1", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:17.275 | INFO     | cvip.orchestrator:_run_scoreboard_ocr:355 - analyze: scoreboard_ocr OK (8394
+samples)
+2026-08-06 13:04:18.713 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:04:18.616694", "end_time": "2026-08-06T13:04:18.713439", "duration_seconds":
+0.09673430002294481, "peak_memory_mb": 49.734375, "input_summary": "operation=persist_scoreboard_readings
+batch_size=8394", "output_summary": "rows_written=8394 schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:18.713 | INFO     | cvip.orchestrator:_run_ocr_timeline_smoother:360 - analyze: ocr_timeline_smoother
+starting
+2026-08-06 13:04:18.937 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"video.ocr_timeline_smoother", "start_time": "2026-08-06T13:04:18.716674", "end_time": "2026-08-06T13:04:18.937175",
+"duration_seconds": 0.22049110010266304, "peak_memory_mb": 62.9140625, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 total_input_samples=8394
+outlier_window=2", "output_summary": "samples_processed=8394 held_forward_unusable_count=4145
+held_forward_outlier_count=19 no_reliable_value_yet_count=0", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:18.937 | INFO     | cvip.orchestrator:_run_ocr_timeline_smoother:367 - analyze: ocr_timeline_smoother
+OK (8394 samples)
+2026-08-06 13:04:18.939 | INFO     | cvip.orchestrator:_run_event_detection:372 - analyze: event_detection starting
+2026-08-06 13:04:18.958 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "events.detection",
+"start_time": "2026-08-06T13:04:18.941218", "end_time": "2026-08-06T13:04:18.958582", "duration_seconds":
+0.017357999924570322, "peak_memory_mb": 63.70703125, "input_summary":
+"source_video_id=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1 total_cleaned_samples=8394
+total_raw_samples=8394 total_replay_segments=2 team_milestone_interval=50", "output_summary": "raw_sample_count=8394
+distinct_state_count=159 state_reduction_pct=98.1 comparisons_processed=158 anomalous_transitions_discarded=0
+anomalous_transition_examples=() four_count=19 six_count=6 wicket_count=16 team_milestone_count=7
+replay_tagged_count=0 innings_transitions_detected=2 average_confidence=0.4858748637548691 config_version=1",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:04:18.959 | INFO     | cvip.orchestrator:_run_event_detection:386 - analyze: event_detection OK (48
+events)
+2026-08-06 13:04:18.965 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:04:18.959647", "end_time": "2026-08-06T13:04:18.965764", "duration_seconds":
+0.00610999995842576, "peak_memory_mb": 63.5390625, "input_summary": "operation=persist_events batch_size=48",
+"output_summary": "rows_written=48 schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:18.971 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:04:18.966363", "end_time": "2026-08-06T13:04:18.971742", "duration_seconds":
+0.005369100021198392, "peak_memory_mb": 63.625, "input_summary": "operation=set_status_complete
+file_hash=45468f648a6cb5e99ebc5b8b41bee71ab9230a0e7d5ee52df75d9c81793fb6a1", "output_summary": "status=COMPLETE
+schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:04:18.974 | INFO     | cvip.orchestrator:analyze:279 - analyze: COMPLETE (match_id=platinum_final_3rd,
+event_count=48)
+
+**********************
+Windows PowerShell transcript end
+End time: 20260806130419
+**********************

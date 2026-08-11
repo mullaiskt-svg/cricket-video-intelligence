@@ -1,0 +1,53 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260807122921
+Username: AARNA\mulla
+RunAs User: AARNA\mulla
+Configuration Name: 
+Machine: AARNA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; $env:PATH = "C:\Users\mulla\AppData\Local\Python\pythoncore-3.14-64\Scripts;" + $env:PATH; Start-Transcript -Path "data\matches\ww_vs_pf_generate.log" -Force; cvip generate ww_vs_pf --template match --output output/ww_vs_pf_highlights.mp4 2>&1; Stop-Transcript
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath 'C:\Users\mulla\AppData\Local\Temp\claude\claude-pwd-ps-f974' -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }
+Process ID: 16020
+PSVersion: 5.1.26100.8875
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8875
+BuildVersion: 10.0.26100.8875
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is data\matches\ww_vs_pf_generate.log
+cvip : 2026-08-07 12:29:22.061 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"db.database", "start_time": "2026-08-07T12:29:22.061519", "end_time": "2026-08-07T12:29:22.061562",
+"duration_seconds": 3.809994086623192e-05, "peak_memory_mb": 93.08984375, "input_summary": "operation=open_database
+path=data\\matches\\ww_vs_pf.sqlite existed=True", "output_summary": "schema_created=False schema_version=2
+schema_version=2", "warnings": [], "failure_reason": null}
+At line:1 char:461
++ ... og" -Force; cvip generate ww_vs_pf --template match --output output/w ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-08-07 12:2..._reason": null}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+2026-08-07 12:29:22.064 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "clips.generator",
+"start_time": "2026-08-07T12:29:22.063481", "end_time": "2026-08-07T12:29:22.064010", "duration_seconds":
+0.0005231001414358616, "peak_memory_mb": 90.9375, "input_summary": "events_count=42
+source_video_path='D:\\\\Mullai-20231003T001727Z-001\\\\WW\\\\WW Matches\\\\WW_VS_PF_h264.mp4'
+video_duration_seconds=10879.0 pre_roll_seconds=35 post_roll_seconds=15 merge_gap_seconds=3 include_replays=False",
+"output_summary": "events_received=42 replay_events_excluded=0 clip_windows_generated=42 merge_operations_performed=17
+final_clip_count=25 average_clip_duration=55.24 total_planned_duration=1381.0 config_version=1", "warnings": [],
+"failure_reason": null}
+2026-08-07 12:29:32.298 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"stitcher.stitcher", "start_time": "2026-08-07T12:29:22.064311", "end_time": "2026-08-07T12:29:32.298765",
+"duration_seconds": 10.234449199866503, "peak_memory_mb": 91.1328125, "input_summary": "clip_count=25
+output_path='output/ww_vs_pf_highlights.mp4' source_video_path='D:\\\\Mullai-20231003T001727Z-001\\\\WW\\\\WW
+Matches\\\\WW_VS_PF_h264.mp4'", "output_summary": "clips_stitched=25 total_requested_duration_seconds=1381.0
+actual_output_duration_seconds=1488.97806 ffmpeg_execution_seconds=9.228887400822714 temp_files_created=26
+temp_files_removed=26 config_version=1", "warnings": [], "failure_reason": null}
+
+**********************
+Windows PowerShell transcript end
+End time: 20260807122932
+**********************

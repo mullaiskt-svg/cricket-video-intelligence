@@ -1,0 +1,54 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260806134024
+Username: AARNA\mulla
+RunAs User: AARNA\mulla
+Configuration Name: 
+Machine: AARNA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; cd d:\mywork\projects\cricket-video-intelligence; $env:PATH = "C:\Users\mulla\AppData\Local\Python\pythoncore-3.14-64\Scripts;" + $env:PATH; Start-Transcript -Path "data\matches\platinum_final_3rd_generate.log" -Force; cvip generate platinum_final_3rd --template match --output output/platinum_final_3rd_highlights.mp4 2>&1; Stop-Transcript
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath 'C:\Users\mulla\AppData\Local\Temp\claude\claude-pwd-ps-49c1' -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }
+Process ID: 19532
+PSVersion: 5.1.26100.8875
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8875
+BuildVersion: 10.0.26100.8875
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is data\matches\platinum_final_3rd_generate.log
+cvip : 2026-08-06 13:40:25.587 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"db.database", "start_time": "2026-08-06T13:40:25.587449", "end_time": "2026-08-06T13:40:25.587489",
+"duration_seconds": 3.6400044336915016e-05, "peak_memory_mb": 92.63671875, "input_summary": "operation=open_database
+path=data\\matches\\platinum_final_3rd.sqlite existed=True", "output_summary": "schema_created=False schema_version=2
+schema_version=2", "warnings": [], "failure_reason": null}
+At line:1 char:521
++ ... og" -Force; cvip generate platinum_final_3rd --template match --outpu ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-08-06 13:4..._reason": null}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+2026-08-06 13:40:25.591 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "clips.generator",
+"start_time": "2026-08-06T13:40:25.589272", "end_time": "2026-08-06T13:40:25.591297", "duration_seconds":
+0.002004600130021572, "peak_memory_mb": 91.2421875, "input_summary": "events_count=78
+source_video_path='D:\\\\Mullai-20231003T001727Z-001\\\\WW\\\\WW Matches\\\\PLATINUM_FINAL_3rd_h264.mp4'
+video_duration_seconds=8440.0 pre_roll_seconds=35 post_roll_seconds=15 merge_gap_seconds=3 include_replays=False",
+"output_summary": "events_received=78 replay_events_excluded=0 clip_windows_generated=78 merge_operations_performed=37
+final_clip_count=41 average_clip_duration=61.1219512195122 total_planned_duration=2506.0 config_version=1",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:40:46.815 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"stitcher.stitcher", "start_time": "2026-08-06T13:40:25.591824", "end_time": "2026-08-06T13:40:46.814897",
+"duration_seconds": 21.22306720004417, "peak_memory_mb": 91.36328125, "input_summary": "clip_count=41
+output_path='output/platinum_final_3rd_highlights.mp4'
+source_video_path='D:\\\\Mullai-20231003T001727Z-001\\\\WW\\\\WW Matches\\\\PLATINUM_FINAL_3rd_h264.mp4'",
+"output_summary": "clips_stitched=41 total_requested_duration_seconds=2506.0
+actual_output_duration_seconds=2687.827583 ffmpeg_execution_seconds=20.194728900911286 temp_files_created=42
+temp_files_removed=42 config_version=1", "warnings": [], "failure_reason": null}
+
+**********************
+Windows PowerShell transcript end
+End time: 20260806134047
+**********************

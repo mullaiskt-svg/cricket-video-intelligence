@@ -1,0 +1,906 @@
+{
+  "innings": [
+    {
+      "innings": 1,
+      "commentary": [
+        {
+          "ball": "19.4",
+          "description": "OUT Caught out, Caught at Wicket keeper by Vijay Krishna Yadav (6r 2b 0x4s 1x6s)"
+        },
+        {
+          "ball": "19.3",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "19.2",
+          "description": "OUT Caught out, Caught at Long-off by GN Vamsi (27r 19b 4x4s 0x6s)"
+        },
+        {
+          "ball": "19.1",
+          "description": "1 run, OUT Run out, Karthik Belide run out Srinivas Reddy Manchala / Afeef"
+        },
+        {
+          "ball": "19.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "18.5",
+          "description": "no run"
+        },
+        {
+          "ball": "18.4",
+          "description": "leg bye, 1 run"
+        },
+        {
+          "ball": "18.3",
+          "description": "no run"
+        },
+        {
+          "ball": "18.3",
+          "description": "wide"
+        },
+        {
+          "ball": "18.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "18.1",
+          "description": "no run"
+        },
+        {
+          "ball": "18.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "17.5",
+          "description": "FOUR, to Straight long-on"
+        },
+        {
+          "ball": "17.4",
+          "description": "FOUR, to Straight long-off"
+        },
+        {
+          "ball": "17.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "17.2",
+          "description": "OUT Run out, Throw from Mid-on by GN Vamsi (Prince run out GN Vamsi / Vijay Krishna Yadav)"
+        },
+        {
+          "ball": "17.1",
+          "description": "no run"
+        },
+        {
+          "ball": "17.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "16.5",
+          "description": "SIX, to Deep mid wicket"
+        },
+        {
+          "ball": "16.4",
+          "description": "no run"
+        },
+        {
+          "ball": "16.3",
+          "description": "FOUR, to Straight long-on"
+        },
+        {
+          "ball": "16.2",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "16.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "16.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "15.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "15.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "15.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "15.2",
+          "description": "OUT Caught out, Caught at Deep square leg by Afeef"
+        },
+        {
+          "ball": "15.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "15.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.5",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "14.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.0",
+          "description": "FOUR, to Fine leg"
+        },
+        {
+          "ball": "13.5",
+          "description": "FOUR, to Third man"
+        },
+        {
+          "ball": "13.4",
+          "description": "leg bye, 1 run"
+        },
+        {
+          "ball": "13.3",
+          "description": "FOUR, to Deep backward point"
+        },
+        {
+          "ball": "13.2",
+          "description": "OUT Caught out, Caught at Cow corner by M. Rajesh"
+        },
+        {
+          "ball": "13.1",
+          "description": "leg bye, 4 runs"
+        },
+        {
+          "ball": "13.0",
+          "description": "no run"
+        },
+        {
+          "ball": "12.5",
+          "description": "bye, 4 runs"
+        },
+        {
+          "ball": "12.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "12.3",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "12.2",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "12.1",
+          "description": "2 runs"
+        },
+        {
+          "ball": "12.0",
+          "description": "no run"
+        },
+        {
+          "ball": "11.5",
+          "description": "no run"
+        },
+        {
+          "ball": "11.4",
+          "description": "no run"
+        },
+        {
+          "ball": "11.3",
+          "description": "no run"
+        },
+        {
+          "ball": "11.3",
+          "description": "FOUR (no ball), to Fine leg"
+        },
+        {
+          "ball": "11.2",
+          "description": "FOUR, to Deep backward point"
+        },
+        {
+          "ball": "11.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "11.0",
+          "description": "OUT Stumped, st Vijay Krishna Yadav b Pavan Repalle (52r 35b)"
+        },
+        {
+          "ball": "10.5",
+          "description": "no run"
+        },
+        {
+          "ball": "10.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "10.3",
+          "description": "no run"
+        },
+        {
+          "ball": "10.2",
+          "description": "SIX, to Deep mid wicket"
+        },
+        {
+          "ball": "10.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "10.0",
+          "description": "no run"
+        },
+        {
+          "ball": "9.5",
+          "description": "FOUR, to Deep point"
+        },
+        {
+          "ball": "9.4",
+          "description": "no run"
+        },
+        {
+          "ball": "9.3",
+          "description": "no run"
+        },
+        {
+          "ball": "9.2",
+          "description": "OUT Caught out, Caught at Short third man by Kesava"
+        },
+        {
+          "ball": "9.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "9.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.4",
+          "description": "no run"
+        },
+        {
+          "ball": "8.3",
+          "description": "no run"
+        },
+        {
+          "ball": "8.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.0",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "7.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "7.4",
+          "description": "no run"
+        },
+        {
+          "ball": "7.3",
+          "description": "no run"
+        },
+        {
+          "ball": "7.3",
+          "description": "wide"
+        },
+        {
+          "ball": "7.3",
+          "description": "wide"
+        },
+        {
+          "ball": "7.2",
+          "description": "no run"
+        },
+        {
+          "ball": "7.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "7.0",
+          "description": "no run"
+        },
+        {
+          "ball": "6.5",
+          "description": "FOUR, to Fine leg"
+        },
+        {
+          "ball": "6.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "6.3",
+          "description": "no run"
+        },
+        {
+          "ball": "6.2",
+          "description": "no run"
+        },
+        {
+          "ball": "6.1",
+          "description": "no run"
+        },
+        {
+          "ball": "6.0",
+          "description": "OUT Caught out, Caught at Short point by Srinivas Reddy Manchala"
+        },
+        {
+          "ball": "5.5",
+          "description": "OUT Bowled, Sai Anurag b GN Vamsi"
+        },
+        {
+          "ball": "5.4",
+          "description": "no run"
+        },
+        {
+          "ball": "5.3",
+          "description": "no run"
+        },
+        {
+          "ball": "5.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "5.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "5.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "4.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "4.4",
+          "description": "2 runs"
+        },
+        {
+          "ball": "4.3",
+          "description": "no run"
+        },
+        {
+          "ball": "4.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "4.1",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "4.0",
+          "description": "2 runs"
+        },
+        {
+          "ball": "3.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "3.5",
+          "description": "wide"
+        },
+        {
+          "ball": "3.4",
+          "description": "no run"
+        },
+        {
+          "ball": "3.4",
+          "description": "1 run (no ball)"
+        },
+        {
+          "ball": "3.3",
+          "description": "FOUR, to Deep mid wicket"
+        },
+        {
+          "ball": "3.3",
+          "description": "wide, 4 runs"
+        },
+        {
+          "ball": "3.2",
+          "description": "2 runs"
+        },
+        {
+          "ball": "3.2",
+          "description": "wide"
+        },
+        {
+          "ball": "3.2",
+          "description": "wide"
+        },
+        {
+          "ball": "3.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "3.0",
+          "description": "no run"
+        },
+        {
+          "ball": "2.5",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "2.4",
+          "description": "FOUR, to Deep point"
+        },
+        {
+          "ball": "2.3",
+          "description": "no run"
+        },
+        {
+          "ball": "2.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "2.1",
+          "description": "FOUR, to Deep backward point"
+        },
+        {
+          "ball": "2.0",
+          "description": "no run"
+        },
+        {
+          "ball": "1.5",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "1.4",
+          "description": "2 runs"
+        },
+        {
+          "ball": "1.3",
+          "description": "FOUR, to Long-off"
+        },
+        {
+          "ball": "1.2",
+          "description": "no run"
+        },
+        {
+          "ball": "1.1",
+          "description": "no run"
+        },
+        {
+          "ball": "1.0",
+          "description": "no run"
+        },
+        {
+          "ball": "0.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "0.4",
+          "description": "FOUR, to Wide long-on"
+        },
+        {
+          "ball": "0.3",
+          "description": "FOUR, to Deep backward point"
+        },
+        {
+          "ball": "0.2",
+          "description": "no run"
+        },
+        {
+          "ball": "0.1",
+          "description": "no run"
+        }
+      ]
+    },
+    {
+      "innings": 2,
+      "commentary": [
+        {
+          "ball": "15.2",
+          "description": "OUT Caught out, Caught at Wide long-off by Karthik Belide"
+        },
+        {
+          "ball": "15.1",
+          "description": "OUT Bowled, Jaya Nataraja b S K Tamil"
+        },
+        {
+          "ball": "15.0",
+          "description": "OUT Run out, Throw from Wide long-off by S K Tamil"
+        },
+        {
+          "ball": "14.5",
+          "description": "no run"
+        },
+        {
+          "ball": "14.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.3",
+          "description": "2 runs"
+        },
+        {
+          "ball": "14.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "14.1",
+          "description": "FOUR, to Deep cover"
+        },
+        {
+          "ball": "14.0",
+          "description": "no run"
+        },
+        {
+          "ball": "13.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "13.4",
+          "description": "no run"
+        },
+        {
+          "ball": "13.3",
+          "description": "OUT Caught out, Caught at Short third man by Bharadwaj"
+        },
+        {
+          "ball": "13.2",
+          "description": "OUT Caught out, Caught at Short third man by Bharadwaj"
+        },
+        {
+          "ball": "13.1",
+          "description": "no run"
+        },
+        {
+          "ball": "13.1",
+          "description": "wide"
+        },
+        {
+          "ball": "13.0",
+          "description": "no run"
+        },
+        {
+          "ball": "12.5",
+          "description": "no run"
+        },
+        {
+          "ball": "12.4",
+          "description": "FOUR, to Long-off"
+        },
+        {
+          "ball": "12.3",
+          "description": "no run"
+        },
+        {
+          "ball": "12.2",
+          "description": "no run"
+        },
+        {
+          "ball": "12.1",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "12.0",
+          "description": "no run"
+        },
+        {
+          "ball": "11.5",
+          "description": "2 runs"
+        },
+        {
+          "ball": "11.4",
+          "description": "no run"
+        },
+        {
+          "ball": "11.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "11.2",
+          "description": "no run"
+        },
+        {
+          "ball": "11.1",
+          "description": "no run"
+        },
+        {
+          "ball": "11.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "10.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "10.4",
+          "description": "OUT Caught out, Caught at Short third man by Bharadwaj"
+        },
+        {
+          "ball": "10.3",
+          "description": "no run"
+        },
+        {
+          "ball": "10.2",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "10.2",
+          "description": "wide"
+        },
+        {
+          "ball": "10.1",
+          "description": "2 runs"
+        },
+        {
+          "ball": "10.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "9.5",
+          "description": "2 runs"
+        },
+        {
+          "ball": "9.4",
+          "description": "no run"
+        },
+        {
+          "ball": "9.3",
+          "description": "2 runs"
+        },
+        {
+          "ball": "9.2",
+          "description": "no run"
+        },
+        {
+          "ball": "9.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "9.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.4",
+          "description": "no run"
+        },
+        {
+          "ball": "8.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "8.1",
+          "description": "2 runs"
+        },
+        {
+          "ball": "8.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "7.5",
+          "description": "no run"
+        },
+        {
+          "ball": "7.4",
+          "description": "no run"
+        },
+        {
+          "ball": "7.3",
+          "description": "FOUR, to Third man"
+        },
+        {
+          "ball": "7.2",
+          "description": "OUT Caught out, Caught at Third man by Bharadwaj"
+        },
+        {
+          "ball": "7.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "7.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "6.5",
+          "description": "OUT Bowled, Venky b Prince"
+        },
+        {
+          "ball": "6.4",
+          "description": "no run"
+        },
+        {
+          "ball": "6.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "6.2",
+          "description": "SIX, to Deep point"
+        },
+        {
+          "ball": "6.1",
+          "description": "no run"
+        },
+        {
+          "ball": "6.0",
+          "description": "OUT Bowled, M. Rajesh b Santhosh Kumar"
+        },
+        {
+          "ball": "5.5",
+          "description": "1 run"
+        },
+        {
+          "ball": "5.4",
+          "description": "1 run"
+        },
+        {
+          "ball": "5.3",
+          "description": "FOUR, to Deep point"
+        },
+        {
+          "ball": "5.2",
+          "description": "OUT Caught out, Caught at Backward square leg by Prince"
+        },
+        {
+          "ball": "5.1",
+          "description": "no run"
+        },
+        {
+          "ball": "5.0",
+          "description": "no run"
+        },
+        {
+          "ball": "4.5",
+          "description": "no run"
+        },
+        {
+          "ball": "4.4",
+          "description": "no run"
+        },
+        {
+          "ball": "4.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "4.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "4.2",
+          "description": "wide"
+        },
+        {
+          "ball": "4.1",
+          "description": "FOUR, to Deep backward square leg"
+        },
+        {
+          "ball": "4.0",
+          "description": "1 run"
+        },
+        {
+          "ball": "3.5",
+          "description": "no run"
+        },
+        {
+          "ball": "3.4",
+          "description": "no run"
+        },
+        {
+          "ball": "3.3",
+          "description": "no run"
+        },
+        {
+          "ball": "3.2",
+          "description": "1 run"
+        },
+        {
+          "ball": "3.1",
+          "description": "1 run"
+        },
+        {
+          "ball": "3.0",
+          "description": "no run"
+        },
+        {
+          "ball": "2.5",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "2.5",
+          "description": "wide"
+        },
+        {
+          "ball": "2.4",
+          "description": "no run"
+        },
+        {
+          "ball": "2.3",
+          "description": "no run"
+        },
+        {
+          "ball": "2.2",
+          "description": "no run"
+        },
+        {
+          "ball": "2.1",
+          "description": "FOUR, to Deep mid wicket"
+        },
+        {
+          "ball": "2.0",
+          "description": "no run"
+        },
+        {
+          "ball": "1.5",
+          "description": "SIX, to Deep backward square leg"
+        },
+        {
+          "ball": "1.4",
+          "description": "FOUR, to Deep point"
+        },
+        {
+          "ball": "1.3",
+          "description": "no run"
+        },
+        {
+          "ball": "1.2",
+          "description": "no run"
+        },
+        {
+          "ball": "1.1",
+          "description": "no run"
+        },
+        {
+          "ball": "1.0",
+          "description": "no run"
+        },
+        {
+          "ball": "0.5",
+          "description": "no run"
+        },
+        {
+          "ball": "0.4",
+          "description": "no run"
+        },
+        {
+          "ball": "0.3",
+          "description": "1 run"
+        },
+        {
+          "ball": "0.2",
+          "description": "no run"
+        },
+        {
+          "ball": "0.1",
+          "description": "no run"
+        }
+      ]
+    }
+  ]
+}

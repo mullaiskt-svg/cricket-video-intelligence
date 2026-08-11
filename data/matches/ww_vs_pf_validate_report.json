@@ -1,0 +1,920 @@
+{
+  "match_id": "ww_vs_pf",
+  "ground_truth_total": 57,
+  "true_positives": 1,
+  "false_negatives_no_signal": 22,
+  "false_negatives_with_signal": 34,
+  "false_positives": 5,
+  "recall_by_event_type": {
+    "FOUR": 0.034482758620689655,
+    "SIX": 0.0,
+    "WICKET": 0.0
+  },
+  "precision": 0.16666666666666666,
+  "missed_events": [
+    {
+      "innings": 1,
+      "over_number": 20,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Sai Kiran to Bhavani, FOUR, to Deep mid wicket",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "description": "Sai Kiran to Mohd Haroon, OUT Bowled (Mohd Haroon b Sai Kiran 0r 1b 0x4s 0x6s SR: 0.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 4,
+      "event_type": "WICKET",
+      "description": "Sai Kiran to Anjini Kumar, OUT Caught out, Caught at Cover by Dileep KP (Anjini Kumar c Dileep KP b Sai Kiran 0r 1b 0x4s 0x6s SR: 0.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "Sai Kiran to Mullai Selvan K T, OUT Caught out, Caught at Long-off by Vinay KV (Mullai Selvan K T c Vinay KV b Sai Kiran 4r 2b 1x4s 0x6s SR: 200.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Sai Kiran to Mullai Selvan K T, FOUR, to Deep mid wicket",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 0,
+      "event_type": "WICKET",
+      "description": "Mohammad Minhajuddin to Prince, OUT Caught out, Caught at Long-on by Mohan (Prince c Mohan b Mohammad Minhajuddin 5r 3b 1x4s 0x6s SR: 166.67)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 18,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Mohammad Minhajuddin to Prince, FOUR, to Long-off",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 18,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Harsha to Mukesh Kumar Mishra, FOUR, to Third man",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 17,
+      "ball_in_over": 1,
+      "event_type": "WICKET",
+      "description": "Harsha to Mukesh Kumar Mishra, OUT Retired out (Rajesh retired out 30r 35b 2x4s 0x6s SR: 85.71)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 16,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Saikiranpittala to Mukesh Kumar Mishra, FOUR, to Deep mid wicket",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 16,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Mohammad Minhajuddin to Rajesh, FOUR, to Deep cover",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 18,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Mohd Haroon to Vinay Kumar Gv, FOUR, to Fine leg",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 17,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "S K Tamil to Vinay KV, OUT Bowled (Vinay KV b S K Tamil 0r 2b 0x4s 0x6s SR: 0.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 17,
+      "ball_in_over": 1,
+      "event_type": "WICKET",
+      "description": "S K Tamil to Haseeb, OUT Bowled (Haseeb b S K Tamil 3r 4b 0x4s 0x6s SR: 75.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 11,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "description": "Santhosh Kumar to Mohan, SIX, to Deep backward point",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 10,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "description": "S K Tamil to Harsha, OUT Caught out, Caught at Cover by Mukesh Kumar Mishra (Harsha c Mukesh Kumar Mishra b S K Tamil 9r 10b 0x4s 1x6s SR: 90.00)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 8,
+      "ball_in_over": 5,
+      "event_type": "SIX",
+      "description": "S K Tamil to Harsha, SIX, to Deep backward square leg",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 6,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Rohith Anand to Dileep KP, FOUR, to Deep extra cover",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 5,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "Bhavani to Mohammad Minhajuddin, OUT Bowled (Mohammad Minhajuddin b Bhavani 23r 21b 3x4s 1x6s SR: 109.52)",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 3,
+      "ball_in_over": 4,
+      "event_type": "FOUR",
+      "description": "Prince to Mohammad Minhajuddin, FOUR, to Long-on",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 3,
+      "ball_in_over": 1,
+      "event_type": "FOUR",
+      "description": "Prince to Mohammad Minhajuddin, FOUR, to Deep point",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 2,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "description": "Mullai Selvan K T to Mohammad Minhajuddin, SIX, to Deep mid wicket",
+      "outcome": "UNRECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 14,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "description": "Saikiranpittala to Mukesh Kumar Mishra, FOUR, to Third man",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 13,
+      "ball_in_over": 4,
+      "event_type": "WICKET",
+      "description": "Harsha G to Santhosh Kumar, OUT Bowled (Santhosh Kumar b Harsha G 14r 10b 0x4s 1x6s SR: 140.00)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 11,
+      "ball_in_over": 5,
+      "event_type": "SIX",
+      "description": "Harsha G to Santhosh Kumar, SIX, to Straight long-on",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 11,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "Harsha G to Sumanth Gampala, OUT Caught out, Caught at Extra cover by Dileep KP (Sumanth Gampala c Dileep KP b Harsha G 11r 14b 1x4s 0x6s SR: 78.57)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 9,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Harsha to Sumanth Gampala, FOUR, to Third man",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 8,
+      "ball_in_over": 2,
+      "event_type": "WICKET",
+      "description": "Harsha to S K Tamil, OUT Caught out, Caught at Cover by Dileep KP (S K Tamil c Dileep KP b Harsha 67r 31b 9x4s 3x6s SR: 216.13)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 7,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "description": "Haseeb to S K Tamil, SIX, to Deep mid wicket",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 6,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Harsha to S K Tamil, FOUR, to Deep mid wicket",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 6,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Harsha to S K Tamil, FOUR, to Third man",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 5,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "description": "Sai Kiran to S K Tamil, SIX, to Cow corner",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 5,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Haseeb to S K Tamil, FOUR, to Deep cover point",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 4,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Haseeb to S K Tamil, FOUR, to Deep cover",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 4,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Haseeb to Rajesh, FOUR, to Fine leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 3,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "description": "Sai Kiran to S K Tamil, FOUR, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 3,
+      "ball_in_over": 0,
+      "event_type": "SIX",
+      "description": "Mohammad Minhajuddin to S K Tamil, SIX, to Deep cover point",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 2,
+      "ball_in_over": 4,
+      "event_type": "FOUR",
+      "description": "Mohammad Minhajuddin to S K Tamil, FOUR, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 1,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Mohammad Minhajuddin to S K Tamil, FOUR, Inside Out to Deep extra cover",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 1,
+      "over_number": 0,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "Mohammad Minhajuddin to S K Tamil, FOUR, Punch to Deep cover",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 16,
+      "ball_in_over": 2,
+      "event_type": "WICKET",
+      "description": "Bhavani to Harsha G, OUT Bowled (Harsha G b Bhavani 2r 3b 0x4s 0x6s SR: 66.67)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "Santhosh Kumar to Mohan, 1 run, OUT Run out, Throw from Cover by Rohith Anand (Mohan run out Rohith Anand / Santhosh Kumar 49r 21b 5x4s 4x6s SR: 233.33)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "description": "Santhosh Kumar to Mohan, SIX, to Deep square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Prince to Mohan, FOUR, to Deep extra cover",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Prince to Mohan, FOUR, to Third man",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "description": "Prince to Mohan, SIX, to Deep square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 1,
+      "event_type": "SIX",
+      "description": "Prince to Mohan, SIX, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 13,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "description": "Bhavani to Srikanth L, SIX, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "S K Tamil to Mohan, FOUR, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "description": "S K Tamil to Mohan, FOUR, to Deep backward point",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "description": "S K Tamil to Mohan, FOUR, to Deep backward square leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 9,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "description": "Mullai Selvan K T to Ajayvarma, OUT Bowled (Ajayvarma b Mullai Selvan K T 6r 11b 0x4s 0x6s SR: 54.55)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 7,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "description": "Bhavani to Dileep KP, OUT Bowled (Dileep KP b Bhavani 15r 16b 2x4s 0x6s SR: 93.75)",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 7,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "description": "Rohith Anand to Dileep KP, FOUR, to Fine leg",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 1,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "description": "Prince to Mohammad Minhajuddin, FOUR, to Deep mid wicket",
+      "outcome": "RECOVERABLE_MISS"
+    },
+    {
+      "innings": 2,
+      "over_number": 1,
+      "ball_in_over": 0,
+      "event_type": "WICKET",
+      "description": "Mullai Selvan K T to Saikiranpittala, OUT Caught behind, Caught Behind by Sumanth Gampala (Saikiranpittala c Sumanth Gampala b Mullai Selvan K T 3r 4b 0x4s 0x6s SR: 75.00)",
+      "outcome": "RECOVERABLE_MISS"
+    }
+  ],
+  "anchored_high_confidence": 0,
+  "anchored_medium_confidence": 1,
+  "anchored_low_confidence": 7,
+  "unresolved_count": 49,
+  "ordering_violations_detected": 353,
+  "ordering_violations_prevented": 29,
+  "validation_detail": [
+    {
+      "innings": 1,
+      "over_number": 20,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 4,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 19,
+      "ball_in_over": 0,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 18,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 18,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 17,
+      "ball_in_over": 1,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 16,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 16,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 1,
+      "over_number": 14,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.27) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 13,
+      "ball_in_over": 4,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.54) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 11,
+      "ball_in_over": 5,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.41) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 11,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.41) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 9,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.27) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 8,
+      "ball_in_over": 2,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.44) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 7,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=LOW(0.34) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=WITHIN_EXPECTED"
+    },
+    {
+      "innings": 1,
+      "over_number": 6,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.28) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 6,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.27) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 5,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.39) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 5,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.39) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 4,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.34) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 4,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.29) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 3,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.35) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 3,
+      "ball_in_over": 0,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.35) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 2,
+      "ball_in_over": 4,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.42) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 1,
+      "over_number": 1,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=MEDIUM(0.45) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN"
+    },
+    {
+      "innings": 1,
+      "over_number": 0,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=MEDIUM(0.45) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN"
+    },
+    {
+      "innings": 2,
+      "over_number": 18,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 17,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 17,
+      "ball_in_over": 1,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 16,
+      "ball_in_over": 2,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.46) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.34) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.47) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 15,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.31) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.30) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.42) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 14,
+      "ball_in_over": 1,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.29) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 13,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.44) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.31) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 3,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.41) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 12,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=MEDIUM(0.41) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 11,
+      "ball_in_over": 3,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 10,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 9,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "ocr_quality=LOW(0.33) score_state=UNKNOWN ordering=VIOLATION neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 8,
+      "ball_in_over": 5,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 7,
+      "ball_in_over": 5,
+      "event_type": "WICKET",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=MEDIUM(0.37) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=SUSPICIOUS"
+    },
+    {
+      "innings": 2,
+      "over_number": 7,
+      "ball_in_over": 0,
+      "event_type": "FOUR",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=MEDIUM(0.37) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN"
+    },
+    {
+      "innings": 2,
+      "over_number": 6,
+      "ball_in_over": 2,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 5,
+      "ball_in_over": 3,
+      "event_type": "WICKET",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 3,
+      "ball_in_over": 4,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 3,
+      "ball_in_over": 1,
+      "event_type": "FOUR",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 2,
+      "ball_in_over": 2,
+      "event_type": "SIX",
+      "validation_tier": "UNRESOLVED",
+      "reason": "no candidate reading found nearby"
+    },
+    {
+      "innings": 2,
+      "over_number": 1,
+      "ball_in_over": 5,
+      "event_type": "FOUR",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=LOW(0.27) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN"
+    },
+    {
+      "innings": 2,
+      "over_number": 1,
+      "ball_in_over": 0,
+      "event_type": "WICKET",
+      "validation_tier": "LOW",
+      "reason": "ocr_quality=LOW(0.27) score_state=UNKNOWN ordering=PRESERVED neighbor_pacing=UNKNOWN"
+    }
+  ]
+}

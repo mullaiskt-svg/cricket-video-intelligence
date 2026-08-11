@@ -1,0 +1,211 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260806133938
+Username: AARNA\mulla
+RunAs User: AARNA\mulla
+Configuration Name: 
+Machine: AARNA (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; cd d:\mywork\projects\cricket-video-intelligence; $env:PATH = "C:\Users\mulla\AppData\Local\Python\pythoncore-3.14-64\Scripts;" + $env:PATH; Start-Transcript -Path "data\matches\platinum_final_3rd_validate.log" -Force; cvip validate platinum_final_3rd --metadata data/ww_vs_ss_commentary.json --recover --enrich 2>&1; Stop-Transcript
+; $_ec = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }
+; (Get-Location).Path | Out-File -FilePath 'C:\Users\mulla\AppData\Local\Temp\claude\claude-pwd-ps-5df9' -Encoding utf8 -NoNewline
+; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { $host.SetShouldExit($_ec) } else { exit $_ec }
+Process ID: 17176
+PSVersion: 5.1.26100.8875
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8875
+BuildVersion: 10.0.26100.8875
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is data\matches\platinum_final_3rd_validate.log
+cvip : 2026-08-06 13:39:44.929 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"db.database", "start_time": "2026-08-06T13:39:44.929022", "end_time": "2026-08-06T13:39:44.929078",
+"duration_seconds": 5.030003376305103e-05, "peak_memory_mb": 92.5859375, "input_summary": "operation=open_database
+path=data\\matches\\platinum_final_3rd.sqlite existed=True", "output_summary": "schema_created=False schema_version=2
+schema_version=2", "warnings": [], "failure_reason": null}
+At line:1 char:521
++ ... og" -Force; cvip validate platinum_final_3rd --metadata data/ww_vs_ss ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-08-06 13:3..._reason": null}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+2026-08-06 13:39:45.056 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.051949", "end_time": "2026-08-06T13:39:45.055925", "duration_seconds":
+0.003965300042182207, "peak_memory_mb": 103.109375, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=17.5 type=FOUR", "output_summary": "event_id=49 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.060 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.056472", "end_time": "2026-08-06T13:39:45.060335", "duration_seconds":
+0.0038554000202566385, "peak_memory_mb": 103.11328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=17.4 type=FOUR", "output_summary": "event_id=50 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.065 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.060834", "end_time": "2026-08-06T13:39:45.065646", "duration_seconds":
+0.004805499920621514, "peak_memory_mb": 103.11328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=11.3 type=FOUR", "output_summary": "event_id=51 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.069 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.066130", "end_time": "2026-08-06T13:39:45.069227", "duration_seconds":
+0.0030896998941898346, "peak_memory_mb": 103.11328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=11.2 type=FOUR", "output_summary": "event_id=52 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.072 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.069734", "end_time": "2026-08-06T13:39:45.072812", "duration_seconds":
+0.003070899983868003, "peak_memory_mb": 103.11328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=11.0 type=WICKET", "output_summary": "event_id=53 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.078 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.073277", "end_time": "2026-08-06T13:39:45.077946", "duration_seconds":
+0.004662899998947978, "peak_memory_mb": 103.11328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=10.2 type=SIX", "output_summary": "event_id=54 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.082 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.078442", "end_time": "2026-08-06T13:39:45.081976", "duration_seconds":
+0.0035274000838398933, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=9.5 type=FOUR", "output_summary": "event_id=55 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.085 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.082453", "end_time": "2026-08-06T13:39:45.085379", "duration_seconds":
+0.002920200116932392, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=9.2 type=WICKET", "output_summary": "event_id=56 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.089 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.085757", "end_time": "2026-08-06T13:39:45.089571", "duration_seconds":
+0.0038078001234680414, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=6.5 type=FOUR", "output_summary": "event_id=57 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.096 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.089961", "end_time": "2026-08-06T13:39:45.095866", "duration_seconds":
+0.00589819997549057, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=6.0 type=WICKET", "output_summary": "event_id=58 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.099 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.096331", "end_time": "2026-08-06T13:39:45.099402", "duration_seconds":
+0.003063300158828497, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=2.5 type=SIX", "output_summary": "event_id=59 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.102 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.099843", "end_time": "2026-08-06T13:39:45.102774", "duration_seconds":
+0.0029255999252200127, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=2.4 type=FOUR", "output_summary": "event_id=60 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.106 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.103219", "end_time": "2026-08-06T13:39:45.106420", "duration_seconds":
+0.003195500001311302, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=2.1 type=FOUR", "output_summary": "event_id=61 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.110 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.106871", "end_time": "2026-08-06T13:39:45.110800", "duration_seconds":
+0.0039234000723809, "peak_memory_mb": 103.1171875, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=1 over_ball=1.3 type=FOUR", "output_summary": "event_id=62 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.114 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.111204", "end_time": "2026-08-06T13:39:45.114706", "duration_seconds":
+0.0034964000806212425, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=15.2 type=WICKET", "output_summary": "event_id=63 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.118 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.115139", "end_time": "2026-08-06T13:39:45.118073", "duration_seconds":
+0.0029272001702338457, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=15.1 type=WICKET", "output_summary": "event_id=64 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.121 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.118488", "end_time": "2026-08-06T13:39:45.121618", "duration_seconds":
+0.0031247001606971025, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=15.0 type=WICKET", "output_summary": "event_id=65 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.125 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.122061", "end_time": "2026-08-06T13:39:45.124946", "duration_seconds":
+0.0028786000330001116, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=12.4 type=FOUR", "output_summary": "event_id=66 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.130 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.125735", "end_time": "2026-08-06T13:39:45.130079", "duration_seconds":
+0.004337099846452475, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=12.1 type=SIX", "output_summary": "event_id=67 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.133 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.130536", "end_time": "2026-08-06T13:39:45.133599", "duration_seconds":
+0.003057599999010563, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=10.4 type=WICKET", "output_summary": "event_id=68 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.137 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.134043", "end_time": "2026-08-06T13:39:45.136929", "duration_seconds":
+0.0028810000512748957, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=10.2 type=FOUR", "output_summary": "event_id=69 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.140 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.137374", "end_time": "2026-08-06T13:39:45.140629", "duration_seconds":
+0.003249600064009428, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=7.3 type=FOUR", "output_summary": "event_id=70 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.146 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.141118", "end_time": "2026-08-06T13:39:45.145995", "duration_seconds":
+0.004869699943810701, "peak_memory_mb": 103.12890625, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=7.2 type=WICKET", "output_summary": "event_id=71 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.149 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.146455", "end_time": "2026-08-06T13:39:45.149483", "duration_seconds":
+0.003021799959242344, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=6.5 type=WICKET", "output_summary": "event_id=72 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.153 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.149918", "end_time": "2026-08-06T13:39:45.152882", "duration_seconds":
+0.0029577999375760555, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=6.2 type=SIX", "output_summary": "event_id=73 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.157 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.153343", "end_time": "2026-08-06T13:39:45.157086", "duration_seconds":
+0.003734299913048744, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=6.0 type=WICKET", "output_summary": "event_id=74 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.162 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.157508", "end_time": "2026-08-06T13:39:45.162111", "duration_seconds":
+0.004595799837261438, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=5.3 type=FOUR", "output_summary": "event_id=75 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.165 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.162604", "end_time": "2026-08-06T13:39:45.165537", "duration_seconds":
+0.002926100045442581, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=5.2 type=WICKET", "output_summary": "event_id=76 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.169 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.165993", "end_time": "2026-08-06T13:39:45.169052", "duration_seconds":
+0.003053699852898717, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=4.1 type=FOUR", "output_summary": "event_id=77 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.174 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.169445", "end_time": "2026-08-06T13:39:45.173943", "duration_seconds":
+0.004491100087761879, "peak_memory_mb": 103.1328125, "input_summary": "operation=persist_recovered_event
+metadata_event_identifier=innings=2 over_ball=2.5 type=SIX", "output_summary": "event_id=78 schema_version=2",
+"warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.180 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.175015", "end_time": "2026-08-06T13:39:45.180247", "duration_seconds":
+0.00522430008277297, "peak_memory_mb": 103.1484375, "input_summary": "operation=update_dismissal_detail event_id=53",
+"output_summary": "event_id=53 dismissal_type=STUMPED schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.184 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.180929", "end_time": "2026-08-06T13:39:45.183871", "duration_seconds":
+0.002935699885711074, "peak_memory_mb": 103.1484375, "input_summary": "operation=update_dismissal_detail event_id=64",
+"output_summary": "event_id=64 dismissal_type=BOWLED schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.187 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.184483", "end_time": "2026-08-06T13:39:45.187721", "duration_seconds":
+0.003232700051739812, "peak_memory_mb": 103.1484375, "input_summary": "operation=update_dismissal_detail event_id=72",
+"output_summary": "event_id=72 dismissal_type=BOWLED schema_version=2", "warnings": [], "failure_reason": null}
+2026-08-06 13:39:45.191 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name": "db.database",
+"start_time": "2026-08-06T13:39:45.188294", "end_time": "2026-08-06T13:39:45.191250", "duration_seconds":
+0.0029500999953597784, "peak_memory_mb": 103.1484375, "input_summary": "operation=update_dismissal_detail
+event_id=74", "output_summary": "event_id=74 dismissal_type=BOWLED schema_version=2", "warnings": [],
+"failure_reason": null}
+2026-08-06 13:39:45.196 | INFO     | cvip.common.diagnostics:emit_diagnostics:45 - {"module_name":
+"metadata.validate", "start_time": "2026-08-06T13:39:44.902021", "end_time": "2026-08-06T13:39:45.196820",
+"duration_seconds": 0.2947885000612587, "peak_memory_mb": 97.7734375, "input_summary":
+"db_path=data/matches/platinum_final_3rd.sqlite metadata_path=data/ww_vs_ss_commentary.json recover=True enrich=True",
+"output_summary": "metadata_entries_parsed=59 alignment_success_rate=0.8814 unrecoverable_events=7 recovered_events=30
+enriched_wicket_events=4 ambiguous_alignments=0", "warnings": [], "failure_reason": null}
+
+**********************
+Windows PowerShell transcript end
+End time: 20260806133945
+**********************

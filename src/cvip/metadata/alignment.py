@@ -7,6 +7,14 @@ ground_truth_v2/validate_recall.py's own hand-traced smoke test.
 Deterministic given identical inputs (FR-018, research.md Decision 7): no
 dependency on dict/set iteration order beyond what the input sequences'
 own order already fixes, no wall-clock dependency.
+
+Extended by specs/014-anchor-validation with an internal Anchor Validation
+sub-step (2b): candidate search (2a, this file's `_rank_candidates`, the
+014-era replacement for the original single-result `_search_reading`) no
+longer commits to the nearest match unconditionally -- it surfaces every
+candidate found, ranked, and `anchor_validation.validate_anchors()` (2b)
+judges each one against independent evidence before any candidate is
+accepted. See specs/014-anchor-validation/contracts/anchor_validation_contract.md.
 """
 
 from __future__ import annotations
@@ -17,6 +25,14 @@ from cvip.metadata.alignment_models import (
     AlignmentConfidenceTier,
     AlignmentOutcome,
     MatchAlignmentEvidence,
+)
+from cvip.metadata.anchor_validation import validate_anchors
+from cvip.metadata.anchor_validation_models import (
+    DEFAULT_ANCHOR_VALIDATION_CONFIG,
+    AnchorConfidenceTier,
+    AnchorValidationConfig,
+    AnchorValidationResult,
+    CandidateAnchor,
 )
 from cvip.metadata.errors import MetadataValidationError, MetadataValidationFailureReason
 from cvip.metadata.extraction_models import MetadataEvent
@@ -32,15 +48,18 @@ def align(
     detected_events: Sequence[dict],
     ball_radius: int = 8,
     match_window_seconds: float = 120.0,
+    validation_config: AnchorValidationConfig = DEFAULT_ANCHOR_VALIDATION_CONFIG,
 ) -> Tuple[MatchAlignmentEvidence, ...]:
-    """For each MetadataEvent: search `scoreboard_readings` (per innings)
-    for a reading at the same (over_number, ball_in_over), preferring a
-    validated reading (parse_confidence == 1.0) and widening the ball
-    offset up to `ball_radius`; then attempt to match against
-    `detected_events` of the same type/innings within
-    `match_window_seconds`. Produces exactly one MatchAlignmentEvidence per
-    input MetadataEvent, in the same order -- never drops one silently,
-    even when both searches fail entirely.
+    """For each MetadataEvent: rank every scoreboard reading found within
+    the tiered per-innings ball-radius search (2a), then run Anchor
+    Validation (2b) -- a per-innings, over.ball-ordered pass that only
+    accepts a candidate when it clears independent hard-reject checks
+    (OCR quality, score-state plausibility, chronological ordering against
+    already-accepted anchors) -- before matching against `detected_events`
+    of the same type/innings within `match_window_seconds`. Produces
+    exactly one MatchAlignmentEvidence per input MetadataEvent, in the
+    same order -- never drops one silently, even when every search and
+    every validation check fails entirely.
 
     Raises MetadataValidationError(POSITION_OUT_OF_RANGE) if any
     ground-truth event's over_number exceeds the highest over_number ever
@@ -51,12 +70,15 @@ def align(
 
     validated_index, any_index = _build_reading_indices(scoreboard_readings)
 
-    evidence: List[MatchAlignmentEvidence] = []
-    for metadata_event in ground_truth:
-        reading, confidence = _search_reading(
-            metadata_event, validated_index, any_index, ball_radius
-        )
-        evidence.append(_build_evidence(metadata_event, reading, confidence))
+    ranked_candidates = tuple(
+        _rank_candidates(metadata_event, validated_index, any_index, ball_radius)
+        for metadata_event in ground_truth
+    )
+    validation_results = validate_anchors(ground_truth, ranked_candidates, validation_config)
+
+    evidence: List[MatchAlignmentEvidence] = [
+        _build_evidence(ground_truth[i], validation_results[i]) for i in range(len(ground_truth))
+    ]
 
     _assign_detected_events(evidence, detected_events, match_window_seconds)
 
@@ -104,57 +126,115 @@ def _build_reading_indices(
     return validated, any_index
 
 
-def _search_reading(
+def _rank_candidates(
     metadata_event: MetadataEvent,
     validated_index: _ReadingIndex,
     any_index: _ReadingIndex,
     ball_radius: int,
-) -> Tuple[Optional[dict], AlignmentConfidenceTier]:
+) -> Tuple[CandidateAnchor, ...]:
+    """2a. Strict generalization of the pre-014 `_search_reading`
+    (contracts/anchor_validation_contract.md Stage 2a): walks the exact
+    same priority order the original single-result search used --
+    exact-ball validated, exact-ball any, then widening radius (validated
+    before any at each step) -- but instead of stopping at the first
+    non-empty bucket, collects every reading from every bucket, in that
+    same priority order, deduplicated by object identity (a validated
+    reading also always appears in the "any" index; only its first,
+    higher-priority appearance is kept). `rank=0` is therefore always
+    exactly what `_search_reading` used to return as its single result."""
     over, ball = metadata_event.over_number, metadata_event.ball_in_over
     innings = metadata_event.innings
+    validated_for_innings = validated_index.get(innings, {})
+    any_for_innings = any_index.get(innings, {})
+
+    candidates: List[CandidateAnchor] = []
+    seen_reading_ids: set = set()
+
+    def add_bucket(index: Dict[Tuple[int, int], List[Tuple[float, dict]]], key: Tuple[int, int], tier: AlignmentConfidenceTier) -> None:
+        entries = index.get(key)
+        if not entries:
+            return
+        for _, reading in sorted(entries, key=lambda pair: pair[0]):
+            reading_id = id(reading)
+            if reading_id in seen_reading_ids:
+                continue
+            seen_reading_ids.add(reading_id)
+            candidates.append(CandidateAnchor(reading=reading, search_tier=tier, rank=len(candidates)))
 
     exact_key = (over, ball)
-    validated_for_innings = validated_index.get(innings, {})
-    if exact_key in validated_for_innings:
-        _, reading = min(validated_for_innings[exact_key], key=lambda pair: pair[0])
-        return reading, AlignmentConfidenceTier.EXACT_BALL_VALIDATED_READING
+    add_bucket(validated_for_innings, exact_key, AlignmentConfidenceTier.EXACT_BALL_VALIDATED_READING)
+    add_bucket(any_for_innings, exact_key, AlignmentConfidenceTier.EXACT_BALL_ANY_READING)
 
-    any_for_innings = any_index.get(innings, {})
-    if exact_key in any_for_innings:
-        _, reading = min(any_for_innings[exact_key], key=lambda pair: pair[0])
-        return reading, AlignmentConfidenceTier.EXACT_BALL_ANY_READING
-
-    for index in (validated_for_innings, any_for_innings):
+    # Validated readings are exhausted across EVERY radius before any
+    # unvalidated one is even considered -- matching the pre-014
+    # `_search_reading` priority this function generalizes (docstring
+    # above), so rank=0 really is what it used to return. Looping radius
+    # as the outer dimension instead (validated and any interleaved at
+    # each radius) would let an unvalidated candidate one ball away
+    # outrank a validated candidate two balls away (PR review finding).
+    for index, tier in (
+        (validated_for_innings, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N),
+        (any_for_innings, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N),
+    ):
         for radius in range(1, ball_radius):
             for delta in (-radius, radius):
-                candidate = (over, ball + delta)
-                if candidate in index:
-                    _, reading = min(index[candidate], key=lambda pair: pair[0])
-                    return reading, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N
+                add_bucket(index, (over, ball + delta), tier)
 
-    return None, AlignmentConfidenceTier.NO_READING_FOUND
+    return tuple(candidates)
 
 
 def _build_evidence(
     metadata_event: MetadataEvent,
-    reading: Optional[dict],
-    confidence: AlignmentConfidenceTier,
+    validation_result: AnchorValidationResult,
 ) -> MatchAlignmentEvidence:
-    if reading is None:
-        reason = f"no reading within radius of over.ball {metadata_event.over_number}.{metadata_event.ball_in_over}"
-        outcome = AlignmentOutcome.UNRECOVERABLE_MISS
+    accepted = validation_result.accepted_candidate
+    reading = accepted.reading if accepted else None
+    search_tier = accepted.search_tier if accepted else AlignmentConfidenceTier.NO_READING_FOUND
+
+    # A candidate having been *found* (outcome=RECOVERABLE_MISS, 013's
+    # original meaning: "some reading exists nearby") is independent of
+    # whether Anchor Validation ultimately *accepted* one -- deliberately
+    # so 013's existing AlignmentOutcome/AccuracyReport fields keep their
+    # exact original meaning and computation (plan.md's own promise), while
+    # `recovery_eligible` (below) carries the new, stricter, validation-
+    # gated meaning and `validation_tier`/`unresolved_count` (Stage 3)
+    # carry the "found but not trustworthy" case 013 could not represent.
+    had_any_candidates = accepted is not None or len(validation_result.rejected_candidates) > 0
+
+    if had_any_candidates:
+        outcome = AlignmentOutcome.RECOVERABLE_MISS
+        if reading is not None:
+            reason = (
+                f"matched reading at t={reading['timestamp_seconds']}s ({search_tier.value}); "
+                f"validation={validation_result.tier.value}"
+            )
+        else:
+            detail = validation_result.signals.reason if validation_result.signals else "no signal detail"
+            reason = (
+                f"candidate reading(s) found for over.ball "
+                f"{metadata_event.over_number}.{metadata_event.ball_in_over} but none passed "
+                f"anchor validation ({detail})"
+            )
     else:
-        reason = f"matched reading at t={reading['timestamp_seconds']}s ({confidence.value})"
-        outcome = AlignmentOutcome.RECOVERABLE_MISS  # provisional; may be upgraded to TRUE_POSITIVE below
+        outcome = AlignmentOutcome.UNRECOVERABLE_MISS
+        reason = f"no reading within radius of over.ball {metadata_event.over_number}.{metadata_event.ball_in_over}"
+
+    recovery_eligible = reading is not None and validation_result.tier in (
+        AnchorConfidenceTier.HIGH,
+        AnchorConfidenceTier.MEDIUM,
+    )
 
     return MatchAlignmentEvidence(
         metadata_event=metadata_event,
         matched_scoreboard_reading=reading,
         matched_detected_event=None,
-        alignment_confidence=confidence,
+        alignment_confidence=search_tier,
         outcome=outcome,
-        recovery_eligible=reading is not None,
+        recovery_eligible=recovery_eligible,
         reason=reason,
+        validation_tier=validation_result.tier,
+        validation_signals=validation_result.signals,
+        rejected_candidates=validation_result.rejected_candidates,
     )
 
 
@@ -196,4 +276,7 @@ def _assign_detected_events(
                 outcome=AlignmentOutcome.TRUE_POSITIVE,
                 recovery_eligible=False,
                 reason=f"matched detected event at t={detected['timestamp_seconds']}s",
+                validation_tier=item.validation_tier,
+                validation_signals=item.validation_signals,
+                rejected_candidates=item.rejected_candidates,
             )

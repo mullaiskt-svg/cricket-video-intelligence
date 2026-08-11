@@ -152,6 +152,84 @@ events:
     TEAM_MILESTONE: 65
     FOUR: 60
 
+metadata:
+  # Anchor Validation (specs/014-anchor-validation): before this feature, the
+  # metadata-to-video-timestamp aligner committed to the nearest scoreboard
+  # reading unconditionally -- real validation against the Wild Wanderers vs
+  # Phoenix Firehawks match found this produced confidently-WRONG timestamps
+  # (not just missed events) when OCR quality was poor: 6 of 33
+  # commentary-recovered events landed out of chronological order, one
+  # anchored 35 minutes away from its true position. These thresholds gate
+  # whether a candidate scoreboard reading is trustworthy enough to accept.
+  #
+  # NOTE: not currently read from this file at runtime -- align()'s own
+  # AnchorValidationConfig dataclass (src/cvip/metadata/anchor_validation_models.py)
+  # carries these same values as its Python defaults, following this
+  # pipeline's own established precedent (align()'s ball_radius/
+  # match_window_seconds parameters are likewise hardcoded defaults, never
+  # wired from this file). This block exists as the documented source of
+  # truth for those defaults and the calibration reasoning behind them, and
+  # as the future wiring point if a per-broadcast override is ever needed.
+  anchor_validation:
+    # WHY these values (revised after real-data validation against the Wild
+    # Wanderers vs Phoenix Firehawks match -- see anchor_validation.py's
+    # classify_tier() docstring for the full self-caught-correction writeup):
+    # an earlier calibration (0.70/0.50/0.35, naively reusing ocr.min_confidence
+    # above as the "high" bar) was checked against real data and found
+    # broken -- raw OCR confidence on this broadcast is uniformly low
+    # (median 0.35 among even smoother-VALIDATED readings; 89% below 0.50)
+    # regardless of whether the reading was ultimately correct or wrong.
+    # That calibration hard-rejected roughly half of even the trustworthy
+    # data and left MEDIUM tier practically unreachable, producing ZERO
+    # recoverable events on a real match -- the opposite of the intended
+    # "fewer highlights, but correct" outcome. Crucially, raw OCR confidence
+    # was never what distinguished this match's 6 actually-wrong anchors
+    # from its 27 correct ones anyway (both shared the same 0.27-0.47
+    # range) -- `ordering` is what catches wrong anchors (proven:
+    # `ordering_violations_prevented=28` on a real re-run), so OCR quality
+    # only needs to gate truly-unreadable frames, not act as the primary
+    # correctness signal.
+    #
+    # ocr_confidence_high: a candidate at or above this needs no other
+    # corroboration to reach HIGH tier -- kept close to ocr.min_confidence
+    # above (Scoreboard OCR's own "reliable" bar) since SOME frames on a
+    # good broadcast do reach it, but not required for automatic recovery.
+    ocr_confidence_high: 0.60
+    # ocr_confidence_medium: below this, OCR quality counts as one
+    # "downgrade" toward MEDIUM tier rather than disqualifying a candidate
+    # outright -- calibrated to sit near the real median (0.349) observed
+    # on a broadcast with this good/poor OCR profile, so a validated,
+    # exact-ball, chronologically-consistent reading can still reach
+    # MEDIUM (and remain auto-recovery-eligible) even with typical-for-this-
+    # broadcast OCR quality.
+    ocr_confidence_medium: 0.35
+    # ocr_confidence_low: the hard floor -- below this, a candidate is
+    # INSUFFICIENT and hard-rejected regardless of corroboration. Set low
+    # enough (real validated-reading minimum observed: 0.151) that it only
+    # catches genuinely unreadable/near-blank frames, not merely
+    # below-average ones on an already-poor broadcast.
+    ocr_confidence_low: 0.15
+    # WHY 5.0: a candidate's implied seconds-per-ball pace is judged
+    # WITHIN_EXPECTED when it falls within this multiplicative factor of the
+    # innings' own recently observed pace (WITHIN_EXPECTED if
+    # 1/tolerance <= ratio <= tolerance) -- generous enough to tolerate a real
+    # over break, bowling change, or wicket celebration without flagging it,
+    # while still catching an order-of-magnitude-wrong candidate. This is a
+    # soft signal only (downgrades the confidence tier, never hard-rejects on
+    # its own) -- see research.md Decision 3.
+    #
+    # Self-caught recalibration (specs/016 follow-on investigation, real
+    # ww_vs_pf data): the original value of 3.0 was picked without checking
+    # the actual observed ratio distribution. On this match, all 33
+    # already-trusted WITHIN_EXPECTED candidates span ratio 0.378-2.974, but
+    # 4 real, otherwise-completely-clean boundaries (e.g. metadata's 5.3,
+    # 6.2, 19.2) landed just outside that band at 3.09-3.965 and were being
+    # excluded purely on this marginal miss -- while the next-nearest
+    # genuinely anomalous candidates don't appear until ratio 11.9. 5.0
+    # covers the real marginal cluster with headroom, while staying more
+    # than 2x below the anomalous cluster's floor.
+    neighbor_pacing_tolerance: 5.0
+
 output:
   container: mp4
   avoid_reencode: true

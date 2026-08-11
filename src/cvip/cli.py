@@ -203,6 +203,28 @@ def _run_validate(args: argparse.Namespace) -> int:
             }
             for event, outcome in report.missed_events
         ],
+        # specs/014-anchor-validation User Story 3: run-level trust summary
+        # -- how many metadata events were confidently recovered vs.
+        # withheld, without inspecting the database directly.
+        "anchored_high_confidence": report.anchored_high_confidence,
+        "anchored_medium_confidence": report.anchored_medium_confidence,
+        "anchored_low_confidence": report.anchored_low_confidence,
+        "unresolved_count": report.unresolved_count,
+        "ordering_violations_detected": report.ordering_violations_detected,
+        "ordering_violations_prevented": report.ordering_violations_prevented,
+        # User Story 2: for every event NOT automatically recovery-eligible,
+        # the best-tried candidate's evidence and a specific reason.
+        "validation_detail": [
+            {
+                "innings": event.innings,
+                "over_number": event.over_number,
+                "ball_in_over": event.ball_in_over,
+                "event_type": event.event_type,
+                "validation_tier": tier,
+                "reason": reason,
+            }
+            for event, tier, reason in report.validation_detail
+        ],
     }
     text = json.dumps(payload, indent=2)
     if args.output:

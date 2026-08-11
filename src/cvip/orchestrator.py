@@ -638,6 +638,12 @@ def validate(request: ValidateRequest) -> ValidateResult:
         recovered_events=recovered_count,
         enriched_wicket_events=enriched_count,
         ambiguous_alignments=0,
+        anchored_high_confidence=report.anchored_high_confidence,
+        anchored_medium_confidence=report.anchored_medium_confidence,
+        anchored_low_confidence=report.anchored_low_confidence,
+        unresolved_events=report.unresolved_count,
+        ordering_violations_detected=report.ordering_violations_detected,
+        ordering_violations_prevented=report.ordering_violations_prevented,
     )
 
     return ValidateResult(

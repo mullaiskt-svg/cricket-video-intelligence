@@ -27,6 +27,15 @@ def emit_validation_diagnostics(
     enriched_wicket_events: int,
     ambiguous_alignments: int,
     failure_reason: Optional[str] = None,
+    # specs/014-anchor-validation additions (spec FR-010) -- defaulted to 0
+    # so the failure-path call site (which has no AccuracyReport to read
+    # these from) doesn't need every call site touched.
+    anchored_high_confidence: int = 0,
+    anchored_medium_confidence: int = 0,
+    anchored_low_confidence: int = 0,
+    unresolved_events: int = 0,
+    ordering_violations_detected: int = 0,
+    ordering_violations_prevented: int = 0,
 ) -> None:
     """Builds and emits the one diagnostics record for this `cvip validate`
     invocation (spec.md point 6's operational metrics)."""
@@ -36,7 +45,13 @@ def emit_validation_diagnostics(
         f"unrecoverable_events={unrecoverable_events} "
         f"recovered_events={recovered_events} "
         f"enriched_wicket_events={enriched_wicket_events} "
-        f"ambiguous_alignments={ambiguous_alignments}"
+        f"ambiguous_alignments={ambiguous_alignments} "
+        f"anchored_high_confidence={anchored_high_confidence} "
+        f"anchored_medium_confidence={anchored_medium_confidence} "
+        f"anchored_low_confidence={anchored_low_confidence} "
+        f"unresolved_events={unresolved_events} "
+        f"ordering_violations_detected={ordering_violations_detected} "
+        f"ordering_violations_prevented={ordering_violations_prevented}"
     )
     diagnostics = tracker.build(
         module_name=MODULE_NAME,

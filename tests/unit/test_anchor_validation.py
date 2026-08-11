@@ -339,6 +339,23 @@ def test_balls_between_negative_returns_none():
     assert _balls_between(2, 0, 1, 0) is None
 
 
+def test_rank_candidates_exhausts_validated_readings_across_all_radii_before_any_unvalidated_one():
+    """PR review finding: looping radius as the outer dimension would
+    interleave an unvalidated reading one ball away ahead of a validated
+    reading two balls away, contradicting `_rank_candidates`' own
+    docstring promise that rank=0 matches what pre-014 `_search_reading`
+    used to return (which exhausted every validated radius first)."""
+    event = _event(over=1, ball=5)
+    readings = [
+        _reading(1, 4, 10.0, parse_confidence=0.5),  # unvalidated, radius 1
+        _reading(1, 3, 20.0, parse_confidence=1.0),  # validated, radius 2
+    ]
+
+    ranked = _rank(event, readings)
+
+    assert ranked[0].reading["timestamp_seconds"] == 20.0  # the validated one, despite being farther
+
+
 # --- validate_anchors: end-to-end engine behavior ----------------------------
 
 def _reading(over, ball, ts, ocr_confidence=0.9, parse_confidence=1.0, runs=None, wickets=None):

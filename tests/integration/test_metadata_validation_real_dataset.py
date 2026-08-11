@@ -22,6 +22,8 @@ import csv
 import json
 import os
 
+import pytest
+
 from cvip.db.database import open_database
 from cvip.db.models import MatchMetadata
 from cvip.metadata.alignment import align
@@ -32,6 +34,25 @@ from cvip.orchestrator_models import ValidateRequest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 INNINGS_TRANSITION_TS = 5829.0
+
+# PR review finding: these real-match investigation artifacts are
+# deliberately .gitignore'd (`/third_match_*.csv`, `/ground_truth_v2/`) --
+# they're this project's own working files from the original OCR
+# investigation (memory: project_ocr_bottleneck.md), not clean, regeneratable
+# fixtures meant to ship in the repo. A checkout that doesn't have this
+# developer's local investigation directory (any CI runner, a fresh clone)
+# would otherwise fail every test in this module with FileNotFoundError.
+_REQUIRED_REAL_DATA_FILES = (
+    "third_match_raw_ocr_v2.csv",
+    "third_match_events_v5.csv",
+    os.path.join("ground_truth_v2", "wild_wanderers_commentary.json"),
+    os.path.join("ground_truth_v2", "phoenix_firehawks_commentary.json"),
+)
+_missing = [f for f in _REQUIRED_REAL_DATA_FILES if not os.path.exists(os.path.join(REPO_ROOT, f))]
+pytestmark = pytest.mark.skipif(
+    bool(_missing),
+    reason=f"real-dataset files not present in this checkout (gitignored, local-only): {_missing}",
+)
 
 #: The recall figure already established by this project's own ad hoc
 #: investigation (compare_recall_v5.py, memory: project_ocr_bottleneck.md)

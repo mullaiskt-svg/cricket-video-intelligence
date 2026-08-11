@@ -165,11 +165,20 @@ def _rank_candidates(
     add_bucket(validated_for_innings, exact_key, AlignmentConfidenceTier.EXACT_BALL_VALIDATED_READING)
     add_bucket(any_for_innings, exact_key, AlignmentConfidenceTier.EXACT_BALL_ANY_READING)
 
-    for radius in range(1, ball_radius):
-        for delta in (-radius, radius):
-            radius_key = (over, ball + delta)
-            add_bucket(validated_for_innings, radius_key, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N)
-            add_bucket(any_for_innings, radius_key, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N)
+    # Validated readings are exhausted across EVERY radius before any
+    # unvalidated one is even considered -- matching the pre-014
+    # `_search_reading` priority this function generalizes (docstring
+    # above), so rank=0 really is what it used to return. Looping radius
+    # as the outer dimension instead (validated and any interleaved at
+    # each radius) would let an unvalidated candidate one ball away
+    # outrank a validated candidate two balls away (PR review finding).
+    for index, tier in (
+        (validated_for_innings, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N),
+        (any_for_innings, AlignmentConfidenceTier.NEARBY_BALL_RADIUS_N),
+    ):
+        for radius in range(1, ball_radius):
+            for delta in (-radius, radius):
+                add_bucket(index, (over, ball + delta), tier)
 
     return tuple(candidates)
 

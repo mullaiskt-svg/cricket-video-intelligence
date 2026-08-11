@@ -16,6 +16,7 @@ assembles the final ordered ClipPlan.
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from dataclasses import replace
 from typing import Dict, List, Optional, Tuple
 
@@ -24,6 +25,7 @@ from cvip.clips.models import (
     ClipEvidence,
     ClipGenerationRequest,
     ClipPlan,
+    ClipStartSource,
     MergeReason,
     PlannedClip,
 )
@@ -76,6 +78,7 @@ class ClipGeneratorRunner:
 
         self._plan: Optional[ClipPlan] = None
         self._evidence_list: List[ClipEvidence] = []
+        self._sorted_scene_cuts: Tuple[float, ...] = ()
 
     def __enter__(self) -> "ClipGeneratorRunner":
         return self
@@ -103,11 +106,12 @@ class ClipGeneratorRunner:
         request = self._request
         self._events_received = len(request.events)
         is_replay_by_id: Dict[str, bool] = {event.event_key: event.is_replay for event in request.events}
+        self._sorted_scene_cuts = tuple(sorted(request.scene_cuts))
 
         # -- Pass 1 (Stages 2-4): window every event, clamp, filter replays --
         surviving: List[Tuple[int, ClipEvidence]] = []
         for index, event in enumerate(request.events):
-            raw_start = event.timestamp_seconds - request.pre_roll_seconds
+            raw_start, start_source = self._resolve_raw_start(event.timestamp_seconds)
             raw_end = event.timestamp_seconds + request.post_roll_seconds
             self._clip_windows_generated += 1
 
@@ -127,6 +131,7 @@ class ClipGeneratorRunner:
                 original_window=(raw_start, raw_end),
                 clamped_window=(clamped_start, clamped_end),
                 excluded_due_to_replay=excluded,
+                start_source=start_source,
             )
             self._evidence_list.append(evidence)
 
@@ -151,6 +156,35 @@ class ClipGeneratorRunner:
         self._finished = True
         self._finish()
         return self._plan
+
+    # -- internal: scene-cut snapping (specs/016-scene-cut-clip-windows) ---
+
+    def _resolve_raw_start(self, event_timestamp: float) -> Tuple[float, ClipStartSource]:
+        """Nearest-before-cut search (research.md Decision 1, contracts/
+        clip_window_snapping_contract.md's amended Stage 2): the largest cut
+        `c` with `event_timestamp - max_cut_search_seconds <= c <=
+        event_timestamp`, else the original fixed pre-roll offset.
+
+        Known limitation (PR review finding, spec.md Edge Cases): there is
+        deliberately NO *minimum* distance floor here -- a cut a second or
+        two before `event_timestamp` is accepted even though `event_timestamp`
+        is the ~15s-lagged scoreboard-update time, so such a snap could start
+        the clip after the delivery itself. Left unguarded on purpose: this
+        path is dormant (orchestrator.generate() doesn't supply scene_cuts,
+        research.md Decision 2), and whether/what floor to add is a
+        snapping-calibration question the spec explicitly defers to
+        quickstart.md's real-data validation rather than guessing a constant
+        here now."""
+        cuts = self._sorted_scene_cuts
+        if cuts:
+            insertion_point = bisect_right(cuts, event_timestamp)
+            if insertion_point > 0:
+                candidate = cuts[insertion_point - 1]
+                if candidate >= event_timestamp - self._request.max_cut_search_seconds:
+                    return candidate, ClipStartSource.CUT_MATCHED
+
+        fixed_start = event_timestamp - self._request.pre_roll_seconds
+        return fixed_start, ClipStartSource.FIXED_OFFSET
 
     # -- internal: Merge Engine (research.md Decision 2) -------------------
 
@@ -274,6 +308,7 @@ class ClipGeneratorRunner:
             ("pre_roll_seconds", request.pre_roll_seconds),
             ("post_roll_seconds", request.post_roll_seconds),
             ("merge_gap_seconds", request.merge_gap_seconds),
+            ("max_cut_search_seconds", request.max_cut_search_seconds),
         ):
             if (
                 value is None

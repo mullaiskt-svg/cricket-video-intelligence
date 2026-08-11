@@ -82,6 +82,9 @@ def test_missing_source_video_path_yields_invalid_input_before_processing():
         # raw TypeError out of math.isfinite().
         ("video_duration_seconds", "not-a-number"),
         ("merge_gap_seconds", None),
+        # specs/016-scene-cut-clip-windows: max_cut_search_seconds follows the
+        # exact same validation rule as every other clip-timing setting.
+        ("max_cut_search_seconds", -1.0),
     ],
 )
 def test_invalid_clip_configuration_yields_invalid_clip_configuration_before_processing(field_name, invalid_value):
@@ -98,3 +101,20 @@ def test_no_event_processed_before_validation_failure():
         with generate_clips(request) as runner:
             runner.run()
             assert False, "run() should have raised before returning"
+
+
+# -- specs/016-scene-cut-clip-windows: SC-002 regression guarantee ----------
+
+
+def test_no_scene_cuts_supplied_is_identical_to_pre_016_fixed_offset_behavior():
+    """A request that never mentions scene_cuts (the default, ()) must
+    produce exactly the fixed-offset window specs/008 always computed --
+    the zero-regression guarantee (FR-007)."""
+    request = _valid_request(events=(_Event("1:0.1:FOUR", 120.0),), pre_roll_seconds=8.0, post_roll_seconds=12.0)
+    with generate_clips(request) as runner:
+        plan = runner.run()
+        evidence = runner.evidence[0]
+
+    assert evidence.original_window == (112.0, 132.0)
+    assert evidence.start_source.value == "FIXED_OFFSET"
+    assert plan.clips[0].clip_start_seconds == 112.0

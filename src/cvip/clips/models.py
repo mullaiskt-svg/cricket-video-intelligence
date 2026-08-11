@@ -30,6 +30,16 @@ class MergeReason(str, Enum):
     CHAIN_MERGE = "CHAIN_MERGE"
 
 
+class ClipStartSource(str, Enum):
+    """Which mechanism produced a clip's start (specs/016-scene-cut-clip-windows
+    FR-009): a real camera cut snapped to via `scene_cuts`, or the original
+    fixed pre-roll offset. See specs/016-scene-cut-clip-windows/research.md
+    Decision 6."""
+
+    CUT_MATCHED = "CUT_MATCHED"
+    FIXED_OFFSET = "FIXED_OFFSET"
+
+
 @dataclass(frozen=True)
 class ClipGenerationRequest:
     """A caller's request configuration, passed to `generate_clips()`.
@@ -45,6 +55,11 @@ class ClipGenerationRequest:
     config file directly by this module -- matching every prior module's own
     precedent for config-derived values (Event Detection's `ranking`/
     `team_milestone_interval`).
+
+    `scene_cuts`/`max_cut_search_seconds` (specs/016-scene-cut-clip-windows)
+    are optional, additive fields: an omitted/empty `scene_cuts` reproduces
+    this module's original, unmodified clip-start behavior exactly (FR-007) --
+    see data-model.md for the full rationale.
     """
 
     events: Sequence[DetectedEventLike]
@@ -54,6 +69,8 @@ class ClipGenerationRequest:
     post_roll_seconds: float
     merge_gap_seconds: float
     include_replays: bool = False
+    scene_cuts: Sequence[float] = field(default_factory=tuple)
+    max_cut_search_seconds: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -79,6 +96,7 @@ class ClipEvidence:
     excluded_due_to_replay: bool = False
     resulting_clip_id: Optional[str] = None
     merge_reasons: tuple[MergeReason, ...] = field(default_factory=tuple)
+    start_source: ClipStartSource = ClipStartSource.FIXED_OFFSET
 
 
 @dataclass(frozen=True)

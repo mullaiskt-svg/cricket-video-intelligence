@@ -131,6 +131,15 @@ events:
   # longer run-ups too; post_roll keeps a small margin above the observed
   # replay-completion point. A reasoned calibration from two samples, not an
   # exhaustively tuned value -- revisit if other footage shows it's wrong.
+  #
+  # specs/016-scene-cut-clip-windows (PR review finding): NOT narrowed to
+  # 10s/10s despite scene-cut snapping now existing, because
+  # orchestrator.generate() -- the only real `cvip generate` call site --
+  # doesn't populate ClipGenerationRequest.scene_cuts (out of this
+  # feature's own scope, research.md Decision 2). Every actual run still
+  # falls back to FIXED_OFFSET today, so these calibrated-from-real-footage
+  # values remain load-bearing; revisit once a future feature wires real
+  # scene-cut data into the generate path.
   pre_roll_seconds: 35
   post_roll_seconds: 15
   merge_gap_seconds: 3

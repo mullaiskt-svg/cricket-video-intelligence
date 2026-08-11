@@ -458,13 +458,21 @@ class _S:
 
 
 def test_tag_readings_with_innings_increments_on_genuine_transition():
+    """specs/015-innings-transition-detection: the shared InningsTracker's
+    persistence requirement (2 consecutive confirmations for this raw-
+    sample call site) means the transition is confirmed on the SECOND
+    low-score sample, not the first -- the first low sample is itself the
+    initial confirmation, not yet enough evidence alone (this is the exact
+    mechanism that now rejects a single noisy misread; a genuine
+    transition, unlike noise, is followed by a second consistent low
+    reading, so it still settles into segment 2 immediately after)."""
     from cvip.orchestrator import _tag_readings_with_innings
 
     samples = [_S(150, 8), _S(180, 8), _S(2, 0), _S(10, 0)]  # a genuine innings transition
 
     tagged = orchestrator._tag_readings_with_innings(samples)
 
-    assert [t.innings for t in tagged] == [1, 1, 2, 2]
+    assert [t.innings for t in tagged] == [1, 1, 1, 2]
 
 
 def test_tag_readings_with_innings_ignores_mid_innings_ocr_noise():
@@ -480,14 +488,27 @@ def test_tag_readings_with_innings_ignores_mid_innings_ocr_noise():
 
 
 def test_tag_readings_with_innings_boundary_at_threshold():
-    from cvip.orchestrator import _NEW_INNINGS_MAX_RUNS, _tag_readings_with_innings
+    """specs/015-innings-transition-detection: the flat runs ceiling
+    (`InningsTransitionConfig.max_runs_for_new_segment`, still 20 --
+    carried over unchanged from the original `_NEW_INNINGS_MAX_RUNS`) is
+    preserved verbatim; the shared tracker's persistence requirement (2
+    consecutive confirmations for this raw-sample call site) means a
+    below-threshold sample needs a second consecutive confirmation to be
+    accepted, so the sequence is extended by one repeated sample versus
+    the pre-015 version of this test -- the boundary behavior itself
+    (at-threshold never triggers, below-threshold does) is unchanged."""
+    from cvip.orchestrator import _tag_readings_with_innings
+    from cvip.video.innings_transition_models import InningsTransitionConfig
 
-    # Exactly at threshold (not below) → still innings 1
-    samples = [_S(100, 5), _S(_NEW_INNINGS_MAX_RUNS, 0)]
+    max_runs = InningsTransitionConfig().max_runs_for_new_segment
+
+    # Exactly at threshold (not below) → still innings 1, however many
+    # times it repeats (never clears reset_plausible at all).
+    samples = [_S(100, 5), _S(max_runs, 0), _S(max_runs, 0)]
     tagged = orchestrator._tag_readings_with_innings(samples)
     assert all(t.innings == 1 for t in tagged)
 
-    # One below threshold → innings 2
-    samples = [_S(100, 5), _S(_NEW_INNINGS_MAX_RUNS - 1, 0)]
+    # One below threshold, sustained for 2 consecutive readings → innings 2.
+    samples = [_S(100, 5), _S(max_runs - 1, 0), _S(max_runs - 1, 0)]
     tagged = orchestrator._tag_readings_with_innings(samples)
-    assert [t.innings for t in tagged] == [1, 2]
+    assert [t.innings for t in tagged] == [1, 1, 2]

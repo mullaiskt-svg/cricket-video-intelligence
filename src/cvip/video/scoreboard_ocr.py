@@ -26,6 +26,8 @@ from cvip.common.diagnostics import DiagnosticsTracker, ExecutionDiagnostics, em
 from cvip.video.frame_extraction import extract_frames
 from cvip.video.frame_extraction_errors import ExtractionError, ExtractionFailureReason
 from cvip.video.frame_extraction_models import ExtractionRequest, SamplingMode
+from cvip.video.innings_transition import InningsTracker
+from cvip.video.innings_transition_models import InningsDecisionOutcome, InningsTransitionConfig
 from cvip.video.models import LoadStatus
 from cvip.video.scoreboard_ocr_errors import (
     ScoreboardOcrError,
@@ -163,6 +165,24 @@ class _LastAcceptedReading:
                 self.ball_in_over = ball_in_over
 
 
+class _InningsReadingView:
+    """Structural reading view (specs/015-innings-transition-detection's
+    own `InningsTracker.observe()` contract) built from one frame's
+    `parsed_fields` -- this module has no `ocr_confidence` available at
+    this call site (only `_validate_reading`'s own `parsed_fields`), so
+    confidence-weighting is inactive here; the reset-plausibility and
+    over/ball-reset checks still apply and are what actually strengthen
+    this call site over its pre-015 single-signal predecessor."""
+
+    __slots__ = ("runs", "wickets", "over_number", "ball_in_over")
+
+    def __init__(self, runs, wickets, over_number, ball_in_over) -> None:
+        self.runs = runs
+        self.wickets = wickets
+        self.over_number = over_number
+        self.ball_in_over = ball_in_over
+
+
 class ScoreboardOcrExtractor:
     """Single-pass raw scoreboard timeline extractor over a validated
     video's frames, via Tesseract OCR against a configured ROI.
@@ -202,6 +222,11 @@ class ScoreboardOcrExtractor:
         # directly, without re-checking.
         self._locked_strategy_name: Optional[str] = None
         self._warmup_samples_seen = 0
+        # specs/015-innings-transition-detection: one confirmation is
+        # sufficient at this call site (see _InningsReadingView's own
+        # docstring for why) -- distinct from orchestrator.py's own
+        # instance of this same shared tracker.
+        self._innings_tracker = InningsTracker(InningsTransitionConfig(min_consecutive_confirmations=1))
 
     def __enter__(self) -> "ScoreboardOcrExtractor":
         return self
@@ -559,13 +584,25 @@ class ScoreboardOcrExtractor:
         # for any field an accepted-but-partial reading never populated) --
         # the same effective skip as a dedicated gate, without a second,
         # redundant mechanism to keep in sync (FR-016).
+        #
+        # specs/015-innings-transition-detection: delegates to the ONE
+        # shared InningsTracker every consumer of this decision now shares
+        # (previously an inline, independent copy of the same weak
+        # heuristic -- specs/005-scoreboard-ocr/spec.md FR-014's original
+        # design). This call site's own role (a per-frame accept/reject
+        # filter, not a segment counter) uses a single-confirmation
+        # config -- unlike orchestrator.py's own instance of this tracker,
+        # which requires sustained evidence before counting a segment --
+        # since discarding the very first frame of a genuine transition
+        # from the OCR sample stream would lose real data for no benefit;
+        # the two NEW corroborating checks (reset plausibility, over/ball
+        # reset) still apply even at one confirmation, which is what
+        # actually closes this module's own share of the original bug.
         innings_transition = (
-            runs is not None
-            and wickets is not None
-            and baseline.runs is not None
-            and baseline.wickets is not None
-            and runs < baseline.runs
-            and wickets < baseline.wickets
+            self._innings_tracker.observe(
+                _InningsReadingView(runs, wickets, over_number, ball_in_over)
+            ).outcome
+            == InningsDecisionOutcome.ACCEPTED
         )
         if not innings_transition:
             if runs is not None and baseline.runs is not None and runs < baseline.runs:

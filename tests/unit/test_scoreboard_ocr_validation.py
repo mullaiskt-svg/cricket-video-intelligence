@@ -495,30 +495,44 @@ def test_large_runs_jump_across_a_genuine_over_advance_is_accepted():
     assert reason is None
 
 
-def test_recovery_jump_after_a_false_innings_transition_is_not_blocked():
-    """The concrete interaction this design avoids: FR-014's innings-
-    transition heuristic occasionally misfires on a garbled mid-innings
-    reading (both runs and wickets coincidentally drop together),
-    temporarily resetting the baseline to an artificially low value. The
-    very next genuinely correct reading then needs a large catch-up jump
-    to get back to the true score -- an earlier magnitude-based version of
-    this fix wrongly blocked that recovery. Since the over_number has
-    genuinely advanced across this gap, the same-ball check must not
-    apply here."""
+def test_wickets_only_slightly_decreased_is_rejected_not_treated_as_a_transition():
+    """specs/015-innings-transition-detection supersedes this test's own
+    pre-015 premise. Previously: FR-014's innings-transition heuristic
+    waved through ANY simultaneous runs+wickets decrease, however small,
+    as a possible innings transition -- which meant a coincidental drop
+    (wickets 4->3, nowhere near a genuine innings-opening 0 or 1) silently
+    corrupted the baseline, requiring a separate "recovery jump" workaround
+    to recognize the next genuinely correct reading. specs/015's real-
+    incident investigation found this exact mechanism (an implausible
+    reading being accepted as a transition and poisoning the baseline)
+    causing real data corruption elsewhere in this pipeline
+    (scoreboard_readings.innings). The shared InningsTracker's
+    reset-plausibility check (wickets must land at or under
+    max_wickets_for_new_segment, not merely "lower than before") now
+    correctly rejects this as ordinary noise -- so the baseline is never
+    corrupted in the first place, and no special recovery handling is
+    needed at all."""
     extractor = _make_extractor()
     baseline = _LastAcceptedReading()
+    # Prime the extractor's own internal InningsTracker to match `baseline`
+    # (mirrors real usage: _validate_reading and baseline.update() are
+    # always called together, in order, starting from the very first frame).
+    extractor._validate_reading(
+        {"batter": "Smith", "runs": 69, "wickets": 4, "over_number": 12, "ball_in_over": 2}, baseline
+    )
     baseline.update(runs=69, wickets=4, over_number=12, ball_in_over=2)
 
-    # A garbled reading coincidentally drops both runs and wickets --
-    # FR-014 suppresses the monotonic checks for this one comparison,
-    # treating it as a possible innings transition.
+    # A garbled reading coincidentally drops both runs and wickets, but
+    # wickets only drops by one (4->3) -- not a plausible innings reset.
     passed, reason = extractor._validate_reading(
         {"batter": "Smith", "runs": 8, "wickets": 3, "over_number": 9, "ball_in_over": 2}, baseline
     )
-    assert passed is True
-    baseline.update(runs=8, wickets=3, over_number=9, ball_in_over=2)
+    assert passed is False
+    assert reason == ValidationFailureReason.RUNS_DECREASED
 
-    # The next genuinely correct reading must recover, not be rejected.
+    # The baseline was never corrupted -- the next genuinely correct
+    # reading (matching the ORIGINAL baseline) passes normally, with no
+    # special "recovery" handling required.
     passed, reason = extractor._validate_reading(
         {"batter": "Smith", "runs": 69, "wickets": 4, "over_number": 12, "ball_in_over": 2}, baseline
     )
@@ -526,16 +540,23 @@ def test_recovery_jump_after_a_false_innings_transition_is_not_blocked():
     assert reason is None
 
 
-# --- FR-014: innings-transition heuristic ------------------------------------
+# --- specs/015-innings-transition-detection: innings-transition heuristic ---
 
 
 def test_innings_transition_suppresses_monotonic_checks():
     extractor = _make_extractor()
     baseline = _LastAcceptedReading()
+    # Prime the extractor's own internal InningsTracker (see the priming
+    # note in test_wickets_only_slightly_decreased_is_rejected_not_treated_as_a_transition).
+    extractor._validate_reading(
+        {"batter": "Smith", "runs": 180, "wickets": 9, "over_number": 45, "ball_in_over": 2}, baseline
+    )
     baseline.update(runs=180, wickets=9, over_number=45, ball_in_over=2)
 
-    # A new innings: runs and wickets both drop -- over_number also drops,
-    # which alone would otherwise be INVALID_OVER_SEQUENCE.
+    # A genuine new innings: runs and wickets both drop near zero, AND
+    # over_number resets near the start -- fully corroborated, so the
+    # over_number drop (which alone would otherwise be INVALID_OVER_SEQUENCE)
+    # is correctly permitted.
     passed, reason = extractor._validate_reading(
         {"batter": "Smith", "runs": 4, "wickets": 0, "over_number": 1, "ball_in_over": 1}, baseline
     )

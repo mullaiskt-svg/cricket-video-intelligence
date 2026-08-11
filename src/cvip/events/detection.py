@@ -28,6 +28,8 @@ from cvip.events.models import (
 )
 from cvip.events.state_transition import detect_state_transitions, is_anomalous_transition
 from cvip.events.state_transition_models import ScoreState
+from cvip.video.innings_transition import InningsTracker
+from cvip.video.innings_transition_models import InningsDecisionOutcome, InningsTransitionConfig
 from cvip.video.replay_detection_models import ReplaySegment
 from cvip.video.scoreboard_ocr_models import ScoreboardSample
 
@@ -76,7 +78,12 @@ class EventDetectionRunner:
         self._tracker_entered = False
         self._failure_reason: Optional[str] = None
 
-        self._innings = 1
+        # specs/015-innings-transition-detection: collapsed ScoreState
+        # streams already imply persistence within each state (each one
+        # represents a run of one-or-more agreeing raw samples), so this
+        # call site needs fewer explicit confirmations than a raw
+        # per-second stream (research.md Decision 4).
+        self._innings_tracker = InningsTracker(InningsTransitionConfig(min_consecutive_confirmations=1))
         self._comparisons_processed = 0
         self._innings_transitions_detected = 0
         # State Transition Detection (state_transition.py) counters.
@@ -147,6 +154,17 @@ class EventDetectionRunner:
         # next comparison, so one corrupted state can't poison every
         # comparison after it (the same class of "baseline poisoning" bug
         # already fixed, independently, in Scoreboard OCR's own validation).
+        # specs/015-innings-transition-detection: prime the shared
+        # InningsTracker with the very first distinct state before the
+        # comparison loop begins. `_process_comparison` below only ever
+        # calls `.observe(current)` starting from the SECOND state (the
+        # first is only ever used as `previous`) -- without this priming
+        # call, the tracker would treat the first real comparison as its
+        # own cold start and never recognize it as a decrease relative to
+        # the match's actual opening state.
+        if distinct_states:
+            self._innings_tracker.observe(distinct_states[0])
+
         last_good_index = 0
         for index in range(1, len(distinct_states)):
             if self._cancelled:
@@ -198,12 +216,17 @@ class EventDetectionRunner:
         # already drops every null-core sample before a ScoreState is ever
         # constructed, and ScoreState's core fields are non-Optional -- so
         # `previous`/`current` are guaranteed fully populated by this point.
-        if current.runs < previous.runs and current.wickets < previous.wickets:
-            # Innings-transition heuristic (FR-010): no event derived, only
-            # the internal baseline/innings counter advance. Reuses Module
-            # 4's own transition condition verbatim (research.md Decision 5).
-            self._innings += 1
-            self._innings_transitions_detected += 1
+        #
+        # specs/015-innings-transition-detection (FR-010): delegates to the
+        # ONE shared InningsTracker every consumer of this decision now
+        # shares (previously an inline, independent copy of the same weak
+        # heuristic -- research.md Decision 5 in specs/007). `current` is
+        # fed as-is: ScoreState already exposes the required structural
+        # fields (runs/wickets/over_number/ball_in_over/average_ocr_confidence).
+        innings_decision = self._innings_tracker.observe(current)
+        if innings_decision.outcome != InningsDecisionOutcome.NOT_A_CANDIDATE:
+            if innings_decision.outcome == InningsDecisionOutcome.ACCEPTED:
+                self._innings_transitions_detected += 1
             return []
 
         runs_delta = current.runs - previous.runs
@@ -247,11 +270,15 @@ class EventDetectionRunner:
             # -- Importance Assignment (FR-015, FR-027) ---------------------
             event = DetectedEvent(
                 event_key=_event_key(
-                    self._innings, current.over_number, current.ball_in_over, event_type, milestone_value
+                    self._innings_tracker.current_segment,
+                    current.over_number,
+                    current.ball_in_over,
+                    event_type,
+                    milestone_value,
                 ),
                 event_type=event_type,
                 timestamp_seconds=current.timestamp_seconds,
-                innings=self._innings,
+                innings=self._innings_tracker.current_segment,
                 over_number=current.over_number,
                 ball_in_over=current.ball_in_over,
                 player=previous.batter if event_type == "WICKET" else None,

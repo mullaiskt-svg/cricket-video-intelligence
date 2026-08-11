@@ -565,6 +565,45 @@ def test_innings_transition_suppresses_monotonic_checks():
     assert reason is None
 
 
+def test_rejected_non_candidate_reading_does_not_poison_the_tracker_baseline():
+    """PR review finding (specs/015-innings-transition-detection): a
+    reading that isn't even a same-baseline decrease (runs unchanged or
+    higher) but has a garbled wickets field can still get rejected by the
+    plain WICKETS_DECREASED check below. Feeding it to the shared
+    InningsTracker anyway -- before knowing this method would reject it --
+    would let the tracker's own "not a decrease -> update baseline" rule
+    silently adopt the garbled wickets value as its new baseline,
+    permanently blocking recognition of the real transition that follows
+    (since a real reset to 0 wickets would never again register as
+    "wickets < baseline.wickets" against an already-0 poisoned baseline).
+    """
+    extractor = _make_extractor()
+    baseline = _LastAcceptedReading()
+    extractor._validate_reading(
+        {"batter": "Smith", "runs": 180, "wickets": 7, "over_number": 45, "ball_in_over": 2}, baseline
+    )
+    baseline.update(runs=180, wickets=7, over_number=45, ball_in_over=2)
+
+    # Garbled OCR: runs unchanged (not a decrease at all), wickets misread
+    # down to 0 -- rejected outright by the plain WICKETS_DECREASED check,
+    # never a innings-transition candidate to begin with.
+    passed, reason = extractor._validate_reading(
+        {"batter": "Smith", "runs": 180, "wickets": 0, "over_number": 45, "ball_in_over": 3}, baseline
+    )
+    assert passed is False
+    assert reason == ValidationFailureReason.WICKETS_DECREASED
+
+    # The genuine second innings starts: runs and wickets both reset near
+    # zero, over_number resets to the start -- must still be recognized as
+    # a real transition, not blocked by a baseline the rejected reading
+    # above should never have been allowed to corrupt.
+    passed, reason = extractor._validate_reading(
+        {"batter": "Jones", "runs": 3, "wickets": 0, "over_number": 1, "ball_in_over": 1}, baseline
+    )
+    assert passed is True
+    assert reason is None
+
+
 # --- FR-030/FR-031: structurally unparseable essential field ----------------
 # specs/011-club-broadcast-overlay-support/ real-video finding (quickstart.md
 # Steps 3/5): `batter` no longer gates a reading with a fully valid score --

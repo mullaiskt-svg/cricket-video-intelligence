@@ -598,37 +598,76 @@ class ScoreboardOcrExtractor:
         # the two NEW corroborating checks (reset plausibility, over/ball
         # reset) still apply even at one confirmation, which is what
         # actually closes this module's own share of the original bug.
-        innings_transition = (
-            self._innings_tracker.observe(
-                _InningsReadingView(runs, wickets, over_number, ball_in_over)
-            ).outcome
-            == InningsDecisionOutcome.ACCEPTED
+        #
+        # The tracker is only ever fed a reading via `.observe()` on a path
+        # this method is about to accept (the corroborated-transition
+        # branch just below, or the ordinary in-range branch at the very
+        # end) -- never a reading it's about to reject for an unrelated
+        # reason (e.g. wickets misread to a value that also fails this
+        # module's own WICKETS_DECREASED check below). Calling `.observe()`
+        # unconditionally would let its "not a decrease -> update
+        # baseline" rule (innings_transition.py's own Step 3) silently
+        # adopt a reading this method itself considers bad as the
+        # tracker's new baseline, permanently blocking recognition of the
+        # real transition that eventually follows (PR review finding).
+        is_decrease_candidate = (
+            runs is not None
+            and wickets is not None
+            and baseline.runs is not None
+            and baseline.wickets is not None
+            and runs < baseline.runs
+            and wickets < baseline.wickets
         )
-        if not innings_transition:
-            if runs is not None and baseline.runs is not None and runs < baseline.runs:
-                return False, ValidationFailureReason.RUNS_DECREASED
-            if wickets is not None and baseline.wickets is not None and wickets < baseline.wickets:
-                return False, ValidationFailureReason.WICKETS_DECREASED
-            if (
-                over_number is not None
-                and baseline.over_number is not None
-                and over_number < baseline.over_number
-            ):
-                return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
-            # Within the *same* over, ball_in_over must not go backwards
-            # either (e.g. baseline "12.5" followed by a noisy "12.3") --
-            # an over_number-only check misses this, since it only compares
-            # across an over boundary, never within one (PR review finding).
-            if (
-                over_number is not None
-                and baseline.over_number is not None
-                and over_number == baseline.over_number
-                and ball_in_over is not None
-                and baseline.ball_in_over is not None
-                and ball_in_over < baseline.ball_in_over
-            ):
-                return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
 
+        if is_decrease_candidate:
+            decision = self._innings_tracker.observe(
+                _InningsReadingView(runs, wickets, over_number, ball_in_over)
+            )
+            if decision.outcome == InningsDecisionOutcome.ACCEPTED:
+                return True, None
+            # Rejected: innings_transition.py's own contract guarantees a
+            # REJECTED_* outcome never touches the tracker's baseline, so
+            # nothing was poisoned by asking. `is_decrease_candidate`
+            # already established runs < baseline.runs, so RUNS_DECREASED
+            # is the same reason the un-exempted checks below would have
+            # produced first anyway.
+            return False, ValidationFailureReason.RUNS_DECREASED
+
+        # Not a full decrease-candidate (both runs AND wickets down) --
+        # still reject a decrease in just one of them on its own; only a
+        # paired decrease is ever eligible for the transition exemption.
+        if runs is not None and baseline.runs is not None and runs < baseline.runs:
+            return False, ValidationFailureReason.RUNS_DECREASED
+        if wickets is not None and baseline.wickets is not None and wickets < baseline.wickets:
+            return False, ValidationFailureReason.WICKETS_DECREASED
+        if (
+            over_number is not None
+            and baseline.over_number is not None
+            and over_number < baseline.over_number
+        ):
+            return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+        # Within the *same* over, ball_in_over must not go backwards
+        # either (e.g. baseline "12.5" followed by a noisy "12.3") --
+        # an over_number-only check misses this, since it only compares
+        # across an over boundary, never within one (PR review finding).
+        if (
+            over_number is not None
+            and baseline.over_number is not None
+            and over_number == baseline.over_number
+            and ball_in_over is not None
+            and baseline.ball_in_over is not None
+            and ball_in_over < baseline.ball_in_over
+        ):
+            return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+        # Accepted, and not a decrease-candidate at all -- sync the
+        # tracker to this same reading so it stays in lockstep with this
+        # module's own baseline (the only way it can correctly recognize a
+        # future genuine decrease, since it is never fed a reading this
+        # method rejects).
+        self._innings_tracker.observe(
+            _InningsReadingView(runs, wickets, over_number, ball_in_over)
+        )
         return True, None
 
     # -- internal: per-frame orchestration -----------------------------------

@@ -221,6 +221,31 @@ def test_innings_transition_heuristic_suppresses_events_and_resets_tracking():
     assert event.innings == 2
 
 
+def test_rejected_innings_transition_candidate_does_not_become_next_comparisons_baseline():
+    """PR review finding (specs/015-innings-transition-detection):
+    `_process_comparison` used to return `[]` for ANY non-NOT_A_CANDIDATE
+    innings-tracker outcome, including a REJECTED one -- so `run()`'s own
+    `last_good_index` tracking (a separate mechanism from the tracker's
+    internal baseline) unconditionally advanced to the rejected state
+    anyway, making it the `previous` the NEXT comparison diffed against."""
+    samples = [
+        _cleaned(0.0, runs=180, wickets=8, over_number=45, ball_in_over=2),
+        # Plausible in magnitude (runs/wickets both near zero) but NOT in
+        # over/ball position (still deep in the 40s, nowhere near an
+        # innings' start) -- REJECTED_NO_OVER_BALL_RESET.
+        _cleaned(1.0, runs=5, wickets=1, over_number=30, ball_in_over=1),
+        # The real next ball: a single-ball FOUR relative to the FIRST
+        # state. If the rejected state above had wrongly become the
+        # baseline, this would compute a huge, implausible runs jump
+        # instead and be discarded as anomalous.
+        _cleaned(2.0, runs=184, wickets=8, over_number=45, ball_in_over=3),
+    ]
+    result = _run(samples)
+
+    assert len(result.events) == 1
+    assert result.events[0].event_type == "FOUR"
+
+
 # --- FR-008, FR-026, Acceptance Scenario US2-1: single milestone crossing -
 
 

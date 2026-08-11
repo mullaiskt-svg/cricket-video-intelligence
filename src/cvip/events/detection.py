@@ -181,6 +181,8 @@ class EventDetectionRunner:
 
             self._comparisons_processed += 1
             pairs = self._process_comparison(previous, current, raw_by_timestamp, replay_index)
+            if pairs is None:
+                continue  # rejected innings-transition candidate; last_good_index not advanced
             for event, evidence in pairs:
                 events.append(event)
                 evidence_list.append(evidence)
@@ -205,11 +207,16 @@ class EventDetectionRunner:
         current: ScoreState,
         raw_by_timestamp: Dict[float, ScoreboardSample],
         replay_index: Tuple[List[ReplaySegment], List[float]],
-    ) -> List[Tuple[DetectedEvent, EventEvidence]]:
+    ) -> Optional[List[Tuple[DetectedEvent, EventEvidence]]]:
         """Runs Timeline Comparison -> Event Rule Engine (FR-022, FR-023)
         for one comparison, then Replay Annotation -> Confidence Assignment
         -> Importance Assignment for any resulting event(s) (FR-014 through
-        FR-016). Returns zero or more (DetectedEvent, EventEvidence) pairs.
+        FR-016). Returns zero or more (DetectedEvent, EventEvidence) pairs,
+        or `None` if `current` was a rejected innings-transition candidate
+        (PR review finding: such a state must be treated like an anomalous
+        transition by the caller -- excluded, never promoted to `previous`
+        for the next comparison -- since it's an implausible/uncorroborated
+        reading, not a trustworthy score to diff future comparisons against).
         """
         # -- Timeline Comparison -------------------------------------------
         # No null-core check here: state_transition.py's detect_state_transitions()
@@ -224,10 +231,11 @@ class EventDetectionRunner:
         # fed as-is: ScoreState already exposes the required structural
         # fields (runs/wickets/over_number/ball_in_over/average_ocr_confidence).
         innings_decision = self._innings_tracker.observe(current)
-        if innings_decision.outcome != InningsDecisionOutcome.NOT_A_CANDIDATE:
-            if innings_decision.outcome == InningsDecisionOutcome.ACCEPTED:
-                self._innings_transitions_detected += 1
+        if innings_decision.outcome == InningsDecisionOutcome.ACCEPTED:
+            self._innings_transitions_detected += 1
             return []
+        if innings_decision.outcome != InningsDecisionOutcome.NOT_A_CANDIDATE:
+            return None
 
         runs_delta = current.runs - previous.runs
         wickets_delta = current.wickets - previous.wickets

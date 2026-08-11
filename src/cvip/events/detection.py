@@ -83,7 +83,31 @@ class EventDetectionRunner:
         # represents a run of one-or-more agreeing raw samples), so this
         # call site needs fewer explicit confirmations than a raw
         # per-second stream (research.md Decision 4).
-        self._innings_tracker = InningsTracker(InningsTransitionConfig(min_consecutive_confirmations=1))
+        #
+        # low_confidence_confirmation_multiplier is ALSO disabled here (set
+        # to 1.0), not just min_consecutive_confirmations=1 (PR review
+        # finding). The multiplier's purpose -- demand more corroboration
+        # when a reading's OCR confidence is low, because a single low-conf
+        # raw sample is more likely spurious -- is already satisfied by
+        # state collapsing on this stream: a ScoreState only exists because
+        # multiple raw samples agreed on it, so its persistence is inherent,
+        # not something to re-demand from the multiplier. Left at the 2.0
+        # default, the multiplier silently pushed this call site's effective
+        # requirement to 2 whenever average_ocr_confidence < 0.5 -- which is
+        # the DOCUMENTED NORM for this project's footage (median 0.35, 89%
+        # below 0.50, memory: project_ocr_bottleneck.md). That defeated the
+        # explicit =1 above and swallowed the first scoring event of every
+        # second innings: the reset state and the first-ball state are BOTH
+        # decreases vs the prior innings' final baseline, so at 2
+        # confirmations the first-ball state gets consumed as the
+        # transition-acceptance (returns []) instead of being diffed as a
+        # normal comparison, dropping the boundary/wicket on it.
+        self._innings_tracker = InningsTracker(
+            InningsTransitionConfig(
+                min_consecutive_confirmations=1,
+                low_confidence_confirmation_multiplier=1.0,
+            )
+        )
         self._comparisons_processed = 0
         self._innings_transitions_detected = 0
         # State Transition Detection (state_transition.py) counters.

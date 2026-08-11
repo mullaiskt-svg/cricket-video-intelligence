@@ -163,7 +163,18 @@ class ClipGeneratorRunner:
         """Nearest-before-cut search (research.md Decision 1, contracts/
         clip_window_snapping_contract.md's amended Stage 2): the largest cut
         `c` with `event_timestamp - max_cut_search_seconds <= c <=
-        event_timestamp`, else the original fixed pre-roll offset."""
+        event_timestamp`, else the original fixed pre-roll offset.
+
+        Known limitation (PR review finding, spec.md Edge Cases): there is
+        deliberately NO *minimum* distance floor here -- a cut a second or
+        two before `event_timestamp` is accepted even though `event_timestamp`
+        is the ~15s-lagged scoreboard-update time, so such a snap could start
+        the clip after the delivery itself. Left unguarded on purpose: this
+        path is dormant (orchestrator.generate() doesn't supply scene_cuts,
+        research.md Decision 2), and whether/what floor to add is a
+        snapping-calibration question the spec explicitly defers to
+        quickstart.md's real-data validation rather than guessing a constant
+        here now."""
         cuts = self._sorted_scene_cuts
         if cuts:
             insertion_point = bisect_right(cuts, event_timestamp)

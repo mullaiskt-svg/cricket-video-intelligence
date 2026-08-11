@@ -221,6 +221,60 @@ def test_innings_transition_heuristic_suppresses_events_and_resets_tracking():
     assert event.innings == 2
 
 
+def test_second_innings_first_ball_event_survives_low_ocr_confidence():
+    """PR review finding: Event Detection builds its InningsTracker with
+    min_consecutive_confirmations=1, but the config's default
+    low_confidence_confirmation_multiplier=2.0 silently forced 2
+    confirmations whenever a state's average_ocr_confidence < 0.5 -- the
+    documented norm for this project's footage (median 0.35). At 2
+    confirmations the innings-2 reset state AND its first-ball state are
+    both decreases vs the prior innings' baseline, so the first-ball state
+    got consumed as the transition-acceptance instead of being diffed as a
+    normal comparison, dropping its boundary. The multiplier is now
+    disabled at this call site (state collapsing already supplies the
+    persistence the multiplier exists to re-demand), so the first innings-2
+    event survives regardless of OCR confidence."""
+    samples = [
+        _cleaned(0.0, runs=165, wickets=7, over_number=45, ball_in_over=2),
+        _cleaned(1.0, runs=0, wickets=0, over_number=0, ball_in_over=1),  # innings-2 reset
+        _cleaned(2.0, runs=6, wickets=0, over_number=0, ball_in_over=2),  # first-ball SIX
+    ]
+    # Every raw sample at typical-for-this-broadcast low OCR confidence.
+    low_conf = {s.timestamp_seconds: (0.3, 1.0) for s in samples}
+    result = _run(samples, confidences=low_conf)
+
+    six_events = [e for e in result.events if e.event_type == "SIX"]
+    assert len(six_events) == 1
+    assert six_events[0].innings == 2
+    assert six_events[0].over_number == 0
+    assert six_events[0].ball_in_over == 2
+
+
+def test_rejected_innings_transition_candidate_does_not_become_next_comparisons_baseline():
+    """PR review finding (specs/015-innings-transition-detection):
+    `_process_comparison` used to return `[]` for ANY non-NOT_A_CANDIDATE
+    innings-tracker outcome, including a REJECTED one -- so `run()`'s own
+    `last_good_index` tracking (a separate mechanism from the tracker's
+    internal baseline) unconditionally advanced to the rejected state
+    anyway, making it the `previous` the NEXT comparison diffed against."""
+    samples = [
+        _cleaned(0.0, runs=180, wickets=8, over_number=45, ball_in_over=2),
+        # Plausible in magnitude (runs/wickets both near zero) but NOT in
+        # over/ball position (still deep in the 40s, nowhere near an
+        # innings' start) -- REJECTED_NO_OVER_BALL_RESET.
+        _cleaned(1.0, runs=5, wickets=1, over_number=30, ball_in_over=1),
+        # The real next ball: a single-ball FOUR relative to the FIRST
+        # state. If the rejected state above had wrongly become the
+        # baseline, this would compute a huge, implausible runs jump
+        # instead and be discarded as anomalous.
+        _cleaned(2.0, runs=184, wickets=8, over_number=45, ball_in_over=3),
+    ]
+    result = _run(samples)
+
+    assert len(result.events) == 1
+    assert result.events[0].event_type == "FOUR"
+
+
 # --- FR-008, FR-026, Acceptance Scenario US2-1: single milestone crossing -
 
 

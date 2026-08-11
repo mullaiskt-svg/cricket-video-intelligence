@@ -28,6 +28,8 @@ from cvip.events.models import (
 )
 from cvip.events.state_transition import detect_state_transitions, is_anomalous_transition
 from cvip.events.state_transition_models import ScoreState
+from cvip.video.innings_transition import InningsTracker
+from cvip.video.innings_transition_models import InningsDecisionOutcome, InningsTransitionConfig
 from cvip.video.replay_detection_models import ReplaySegment
 from cvip.video.scoreboard_ocr_models import ScoreboardSample
 
@@ -76,7 +78,36 @@ class EventDetectionRunner:
         self._tracker_entered = False
         self._failure_reason: Optional[str] = None
 
-        self._innings = 1
+        # specs/015-innings-transition-detection: collapsed ScoreState
+        # streams already imply persistence within each state (each one
+        # represents a run of one-or-more agreeing raw samples), so this
+        # call site needs fewer explicit confirmations than a raw
+        # per-second stream (research.md Decision 4).
+        #
+        # low_confidence_confirmation_multiplier is ALSO disabled here (set
+        # to 1.0), not just min_consecutive_confirmations=1 (PR review
+        # finding). The multiplier's purpose -- demand more corroboration
+        # when a reading's OCR confidence is low, because a single low-conf
+        # raw sample is more likely spurious -- is already satisfied by
+        # state collapsing on this stream: a ScoreState only exists because
+        # multiple raw samples agreed on it, so its persistence is inherent,
+        # not something to re-demand from the multiplier. Left at the 2.0
+        # default, the multiplier silently pushed this call site's effective
+        # requirement to 2 whenever average_ocr_confidence < 0.5 -- which is
+        # the DOCUMENTED NORM for this project's footage (median 0.35, 89%
+        # below 0.50, memory: project_ocr_bottleneck.md). That defeated the
+        # explicit =1 above and swallowed the first scoring event of every
+        # second innings: the reset state and the first-ball state are BOTH
+        # decreases vs the prior innings' final baseline, so at 2
+        # confirmations the first-ball state gets consumed as the
+        # transition-acceptance (returns []) instead of being diffed as a
+        # normal comparison, dropping the boundary/wicket on it.
+        self._innings_tracker = InningsTracker(
+            InningsTransitionConfig(
+                min_consecutive_confirmations=1,
+                low_confidence_confirmation_multiplier=1.0,
+            )
+        )
         self._comparisons_processed = 0
         self._innings_transitions_detected = 0
         # State Transition Detection (state_transition.py) counters.
@@ -147,6 +178,17 @@ class EventDetectionRunner:
         # next comparison, so one corrupted state can't poison every
         # comparison after it (the same class of "baseline poisoning" bug
         # already fixed, independently, in Scoreboard OCR's own validation).
+        # specs/015-innings-transition-detection: prime the shared
+        # InningsTracker with the very first distinct state before the
+        # comparison loop begins. `_process_comparison` below only ever
+        # calls `.observe(current)` starting from the SECOND state (the
+        # first is only ever used as `previous`) -- without this priming
+        # call, the tracker would treat the first real comparison as its
+        # own cold start and never recognize it as a decrease relative to
+        # the match's actual opening state.
+        if distinct_states:
+            self._innings_tracker.observe(distinct_states[0])
+
         last_good_index = 0
         for index in range(1, len(distinct_states)):
             if self._cancelled:
@@ -163,6 +205,8 @@ class EventDetectionRunner:
 
             self._comparisons_processed += 1
             pairs = self._process_comparison(previous, current, raw_by_timestamp, replay_index)
+            if pairs is None:
+                continue  # rejected innings-transition candidate; last_good_index not advanced
             for event, evidence in pairs:
                 events.append(event)
                 evidence_list.append(evidence)
@@ -187,24 +231,35 @@ class EventDetectionRunner:
         current: ScoreState,
         raw_by_timestamp: Dict[float, ScoreboardSample],
         replay_index: Tuple[List[ReplaySegment], List[float]],
-    ) -> List[Tuple[DetectedEvent, EventEvidence]]:
+    ) -> Optional[List[Tuple[DetectedEvent, EventEvidence]]]:
         """Runs Timeline Comparison -> Event Rule Engine (FR-022, FR-023)
         for one comparison, then Replay Annotation -> Confidence Assignment
         -> Importance Assignment for any resulting event(s) (FR-014 through
-        FR-016). Returns zero or more (DetectedEvent, EventEvidence) pairs.
+        FR-016). Returns zero or more (DetectedEvent, EventEvidence) pairs,
+        or `None` if `current` was a rejected innings-transition candidate
+        (PR review finding: such a state must be treated like an anomalous
+        transition by the caller -- excluded, never promoted to `previous`
+        for the next comparison -- since it's an implausible/uncorroborated
+        reading, not a trustworthy score to diff future comparisons against).
         """
         # -- Timeline Comparison -------------------------------------------
         # No null-core check here: state_transition.py's detect_state_transitions()
         # already drops every null-core sample before a ScoreState is ever
         # constructed, and ScoreState's core fields are non-Optional -- so
         # `previous`/`current` are guaranteed fully populated by this point.
-        if current.runs < previous.runs and current.wickets < previous.wickets:
-            # Innings-transition heuristic (FR-010): no event derived, only
-            # the internal baseline/innings counter advance. Reuses Module
-            # 4's own transition condition verbatim (research.md Decision 5).
-            self._innings += 1
+        #
+        # specs/015-innings-transition-detection (FR-010): delegates to the
+        # ONE shared InningsTracker every consumer of this decision now
+        # shares (previously an inline, independent copy of the same weak
+        # heuristic -- research.md Decision 5 in specs/007). `current` is
+        # fed as-is: ScoreState already exposes the required structural
+        # fields (runs/wickets/over_number/ball_in_over/average_ocr_confidence).
+        innings_decision = self._innings_tracker.observe(current)
+        if innings_decision.outcome == InningsDecisionOutcome.ACCEPTED:
             self._innings_transitions_detected += 1
             return []
+        if innings_decision.outcome != InningsDecisionOutcome.NOT_A_CANDIDATE:
+            return None
 
         runs_delta = current.runs - previous.runs
         wickets_delta = current.wickets - previous.wickets
@@ -247,11 +302,15 @@ class EventDetectionRunner:
             # -- Importance Assignment (FR-015, FR-027) ---------------------
             event = DetectedEvent(
                 event_key=_event_key(
-                    self._innings, current.over_number, current.ball_in_over, event_type, milestone_value
+                    self._innings_tracker.current_segment,
+                    current.over_number,
+                    current.ball_in_over,
+                    event_type,
+                    milestone_value,
                 ),
                 event_type=event_type,
                 timestamp_seconds=current.timestamp_seconds,
-                innings=self._innings,
+                innings=self._innings_tracker.current_segment,
                 over_number=current.over_number,
                 ball_in_over=current.ball_in_over,
                 player=previous.batter if event_type == "WICKET" else None,

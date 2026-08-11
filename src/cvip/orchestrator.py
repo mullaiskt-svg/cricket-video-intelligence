@@ -18,7 +18,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from loguru import logger
 
@@ -59,6 +59,8 @@ from cvip.stitcher.errors import VideoStitchingError, VideoStitchingFailureReaso
 from cvip.stitcher.models import StitchRequest
 from cvip.stitcher.stitcher import stitch_video
 from cvip.video.errors import FailureReason as VideoLoaderFailureReason
+from cvip.video.innings_transition import InningsTracker
+from cvip.video.innings_transition_models import InningsTransitionConfig
 from cvip.video.loader import load_video
 from cvip.video.models import LoadStatus
 from cvip.video.ocr_timeline_smoother import smooth_timeline
@@ -110,19 +112,16 @@ def _require_native_dependencies() -> None:
 
 
 # -- Capability: innings reconstruction for scoreboard_readings persistence
-# (research.md Decision 9 -- neither ScoreboardSample nor
-# CleanedScoreboardSample carries innings; this replicates the same
-# both-runs-and-wickets-decreased heuristic Scoreboard OCR's own validation
-# and Event Detection's own FR-010 already establish, applied here as a
-# simple forward scan purely for persistence) --------------------------------
+# (specs/015-innings-transition-detection -- neither ScoreboardSample nor
+# CleanedScoreboardSample carries innings; this is a thin adapter over the
+# ONE shared InningsTracker every consumer of this decision now shares,
+# superseding the previous independent forward-scan heuristic that
+# fragmented a real two-innings match into five on real data) ---------------
 
-#: Maximum runs value that can open a new innings. A genuine innings break
-#: resets runs to near 0; OCR noise only fluctuates readings by a few units
-#: (e.g., 147 → 143) and will never produce a near-zero reading at mid-innings.
-#: Without this guard, simultaneous small OCR-noise decreases in both runs
-#: and wickets (e.g., PLATINUM CUP FINAL: 147→143 and 5→3) triggered
-#: spurious innings increments, fragmenting 2 real innings into 9 fake ones.
-_NEW_INNINGS_MAX_RUNS = 20
+#: Raw, per-second sample streams need a real persistence requirement
+#: (specs/015's own real-incident finding); this value is this call site's
+#: own config, distinct from events/detection.py's collapsed-state stream.
+_RAW_STREAM_CONFIRMATIONS = 2
 
 
 class _ScoreboardReadingWithInnings:
@@ -147,22 +146,11 @@ class _ScoreboardReadingWithInnings:
 
 
 def _tag_readings_with_innings(samples) -> List[_ScoreboardReadingWithInnings]:
+    tracker = InningsTracker(InningsTransitionConfig(min_consecutive_confirmations=_RAW_STREAM_CONFIRMATIONS))
     tagged = []
-    innings = 1
-    last_runs: Optional[int] = None
-    last_wickets: Optional[int] = None
     for sample in samples:
-        if sample.runs is not None and sample.wickets is not None:
-            if (
-                last_runs is not None
-                and last_wickets is not None
-                and sample.runs < last_runs
-                and sample.wickets < last_wickets
-                and sample.runs < _NEW_INNINGS_MAX_RUNS
-            ):
-                innings += 1
-            last_runs, last_wickets = sample.runs, sample.wickets
-        tagged.append(_ScoreboardReadingWithInnings(sample, innings))
+        decision = tracker.observe(sample)
+        tagged.append(_ScoreboardReadingWithInnings(sample, decision.segment))
     return tagged
 
 

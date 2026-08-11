@@ -26,6 +26,8 @@ from cvip.common.diagnostics import DiagnosticsTracker, ExecutionDiagnostics, em
 from cvip.video.frame_extraction import extract_frames
 from cvip.video.frame_extraction_errors import ExtractionError, ExtractionFailureReason
 from cvip.video.frame_extraction_models import ExtractionRequest, SamplingMode
+from cvip.video.innings_transition import InningsTracker
+from cvip.video.innings_transition_models import InningsDecisionOutcome, InningsTransitionConfig
 from cvip.video.models import LoadStatus
 from cvip.video.scoreboard_ocr_errors import (
     ScoreboardOcrError,
@@ -163,6 +165,24 @@ class _LastAcceptedReading:
                 self.ball_in_over = ball_in_over
 
 
+class _InningsReadingView:
+    """Structural reading view (specs/015-innings-transition-detection's
+    own `InningsTracker.observe()` contract) built from one frame's
+    `parsed_fields` -- this module has no `ocr_confidence` available at
+    this call site (only `_validate_reading`'s own `parsed_fields`), so
+    confidence-weighting is inactive here; the reset-plausibility and
+    over/ball-reset checks still apply and are what actually strengthen
+    this call site over its pre-015 single-signal predecessor."""
+
+    __slots__ = ("runs", "wickets", "over_number", "ball_in_over")
+
+    def __init__(self, runs, wickets, over_number, ball_in_over) -> None:
+        self.runs = runs
+        self.wickets = wickets
+        self.over_number = over_number
+        self.ball_in_over = ball_in_over
+
+
 class ScoreboardOcrExtractor:
     """Single-pass raw scoreboard timeline extractor over a validated
     video's frames, via Tesseract OCR against a configured ROI.
@@ -202,6 +222,11 @@ class ScoreboardOcrExtractor:
         # directly, without re-checking.
         self._locked_strategy_name: Optional[str] = None
         self._warmup_samples_seen = 0
+        # specs/015-innings-transition-detection: one confirmation is
+        # sufficient at this call site (see _InningsReadingView's own
+        # docstring for why) -- distinct from orchestrator.py's own
+        # instance of this same shared tracker.
+        self._innings_tracker = InningsTracker(InningsTransitionConfig(min_consecutive_confirmations=1))
 
     def __enter__(self) -> "ScoreboardOcrExtractor":
         return self
@@ -559,7 +584,33 @@ class ScoreboardOcrExtractor:
         # for any field an accepted-but-partial reading never populated) --
         # the same effective skip as a dedicated gate, without a second,
         # redundant mechanism to keep in sync (FR-016).
-        innings_transition = (
+        #
+        # specs/015-innings-transition-detection: delegates to the ONE
+        # shared InningsTracker every consumer of this decision now shares
+        # (previously an inline, independent copy of the same weak
+        # heuristic -- specs/005-scoreboard-ocr/spec.md FR-014's original
+        # design). This call site's own role (a per-frame accept/reject
+        # filter, not a segment counter) uses a single-confirmation
+        # config -- unlike orchestrator.py's own instance of this tracker,
+        # which requires sustained evidence before counting a segment --
+        # since discarding the very first frame of a genuine transition
+        # from the OCR sample stream would lose real data for no benefit;
+        # the two NEW corroborating checks (reset plausibility, over/ball
+        # reset) still apply even at one confirmation, which is what
+        # actually closes this module's own share of the original bug.
+        #
+        # The tracker is only ever fed a reading via `.observe()` on a path
+        # this method is about to accept (the corroborated-transition
+        # branch just below, or the ordinary in-range branch at the very
+        # end) -- never a reading it's about to reject for an unrelated
+        # reason (e.g. wickets misread to a value that also fails this
+        # module's own WICKETS_DECREASED check below). Calling `.observe()`
+        # unconditionally would let its "not a decrease -> update
+        # baseline" rule (innings_transition.py's own Step 3) silently
+        # adopt a reading this method itself considers bad as the
+        # tracker's new baseline, permanently blocking recognition of the
+        # real transition that eventually follows (PR review finding).
+        is_decrease_candidate = (
             runs is not None
             and wickets is not None
             and baseline.runs is not None
@@ -567,31 +618,56 @@ class ScoreboardOcrExtractor:
             and runs < baseline.runs
             and wickets < baseline.wickets
         )
-        if not innings_transition:
-            if runs is not None and baseline.runs is not None and runs < baseline.runs:
-                return False, ValidationFailureReason.RUNS_DECREASED
-            if wickets is not None and baseline.wickets is not None and wickets < baseline.wickets:
-                return False, ValidationFailureReason.WICKETS_DECREASED
-            if (
-                over_number is not None
-                and baseline.over_number is not None
-                and over_number < baseline.over_number
-            ):
-                return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
-            # Within the *same* over, ball_in_over must not go backwards
-            # either (e.g. baseline "12.5" followed by a noisy "12.3") --
-            # an over_number-only check misses this, since it only compares
-            # across an over boundary, never within one (PR review finding).
-            if (
-                over_number is not None
-                and baseline.over_number is not None
-                and over_number == baseline.over_number
-                and ball_in_over is not None
-                and baseline.ball_in_over is not None
-                and ball_in_over < baseline.ball_in_over
-            ):
-                return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
 
+        if is_decrease_candidate:
+            decision = self._innings_tracker.observe(
+                _InningsReadingView(runs, wickets, over_number, ball_in_over)
+            )
+            if decision.outcome == InningsDecisionOutcome.ACCEPTED:
+                return True, None
+            # Rejected: innings_transition.py's own contract guarantees a
+            # REJECTED_* outcome never touches the tracker's baseline, so
+            # nothing was poisoned by asking. `is_decrease_candidate`
+            # already established runs < baseline.runs, so RUNS_DECREASED
+            # is the same reason the un-exempted checks below would have
+            # produced first anyway.
+            return False, ValidationFailureReason.RUNS_DECREASED
+
+        # Not a full decrease-candidate (both runs AND wickets down) --
+        # still reject a decrease in just one of them on its own; only a
+        # paired decrease is ever eligible for the transition exemption.
+        if runs is not None and baseline.runs is not None and runs < baseline.runs:
+            return False, ValidationFailureReason.RUNS_DECREASED
+        if wickets is not None and baseline.wickets is not None and wickets < baseline.wickets:
+            return False, ValidationFailureReason.WICKETS_DECREASED
+        if (
+            over_number is not None
+            and baseline.over_number is not None
+            and over_number < baseline.over_number
+        ):
+            return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+        # Within the *same* over, ball_in_over must not go backwards
+        # either (e.g. baseline "12.5" followed by a noisy "12.3") --
+        # an over_number-only check misses this, since it only compares
+        # across an over boundary, never within one (PR review finding).
+        if (
+            over_number is not None
+            and baseline.over_number is not None
+            and over_number == baseline.over_number
+            and ball_in_over is not None
+            and baseline.ball_in_over is not None
+            and ball_in_over < baseline.ball_in_over
+        ):
+            return False, ValidationFailureReason.INVALID_OVER_SEQUENCE
+
+        # Accepted, and not a decrease-candidate at all -- sync the
+        # tracker to this same reading so it stays in lockstep with this
+        # module's own baseline (the only way it can correctly recognize a
+        # future genuine decrease, since it is never fed a reading this
+        # method rejects).
+        self._innings_tracker.observe(
+            _InningsReadingView(runs, wickets, over_number, ball_in_over)
+        )
         return True, None
 
     # -- internal: per-frame orchestration -----------------------------------

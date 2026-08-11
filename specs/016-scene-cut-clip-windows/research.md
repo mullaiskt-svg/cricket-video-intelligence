@@ -87,15 +87,18 @@ the meaning of any existing field, so there's no need for a parallel request sha
 
 ## Decision 5: Max search distance default
 
-**Decision**: `max_cut_search_seconds` defaults to `20.0` — roughly double the existing
-`pre_roll_seconds` default (10s, per `config/default.yaml`), reasoned as: a cut search that can't
-reach back at least as far as the existing fixed pre-roll would be strictly worse than today's
-behavior for events where a cut exists just beyond that range; doubling gives real headroom to
-find a genuine nearby cut without risking a snap into an unrelated, much-earlier moment. This is a
-starting default, not an exhaustively-tuned constant — quickstart.md's real-data validation
-(once the `ww_vs_pf` scene-boundary fixture is available) is what actually confirms or corrects
-it, following this project's own established "reasoned calibration from real samples, revisit if
-wrong" convention for exactly this kind of value.
+**Decision**: `max_cut_search_seconds` defaults to `20.0`, reasoned at the time against a
+`pre_roll_seconds` default of 10s (roughly double it) -- since superseded (PR review finding:
+`config/default.yaml`'s `pre_roll_seconds`/`post_roll_seconds` were reverted to their original
+35s/15s calibration, since `orchestrator.generate()` doesn't populate `scene_cuts` yet and every
+real run still depends on that fallback). `max_cut_search_seconds` itself was left at `20.0`
+rather than re-derived from 35s, since this field is this module's own hardcoded default (never
+read from `config/default.yaml`, matching this package's established precedent for such values)
+and changing it is a separate, real-data-driven calibration question outside this specific
+finding's scope. This is a starting default, not an exhaustively-tuned constant — quickstart.md's
+real-data validation (once the `ww_vs_pf` scene-boundary fixture is available) is what actually
+confirms or corrects it, following this project's own established "reasoned calibration from real
+samples, revisit if wrong" convention for exactly this kind of value.
 
 **Rationale**: Grounding the default in the existing `pre_roll_seconds` value (rather than an
 arbitrary round number) keeps the two settings coherently related — the search distance should be

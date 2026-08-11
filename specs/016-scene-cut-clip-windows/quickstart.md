@@ -13,8 +13,10 @@ both already identified — this is a targeted end-to-end check, not exploratory
   anchored at the timestamp verified by direct frame inspection to fall during a "REPLAY" overlay
   with a static, unchanging scoreboard (49-2, "Dileep K 14(13)") across the entire existing
   fixed-offset clip window.
-- `config/default.yaml`'s existing `events.pre_roll_seconds`/`post_roll_seconds` (10s/10s) as the
-  baseline this feature's fallback path must reproduce exactly.
+- `config/default.yaml`'s existing `events.pre_roll_seconds`/`post_roll_seconds` (35s/15s -- kept
+  at their original calibrated values, PR review finding: `orchestrator.generate()` doesn't
+  populate `scene_cuts` yet, so every real run still depends on this fallback) as the baseline
+  this feature's fallback path must reproduce exactly.
 
 ## Scenario 1 — The real defective clip now starts at a real cut (SC-001)
 

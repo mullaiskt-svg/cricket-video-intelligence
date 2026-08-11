@@ -7,7 +7,7 @@ diagnostics field coverage.
 from dataclasses import dataclass
 
 from cvip.clips.generator import generate_clips
-from cvip.clips.models import ClipGenerationRequest, MergeReason
+from cvip.clips.models import ClipGenerationRequest, ClipStartSource, MergeReason
 
 
 @dataclass(frozen=True)
@@ -299,3 +299,154 @@ def test_average_clip_duration_is_zero_when_no_clips_produced(mocker):
     output_summary = emit_spy.call_args[0][0].output_summary
     assert "average_clip_duration=0.0" in output_summary
     assert "final_clip_count=0" in output_summary
+
+
+# -- specs/016-scene-cut-clip-windows: nearest-before-cut search -----------
+# (Foundational: the search algorithm in isolation, per research.md Decision 1)
+
+
+def test_nearest_before_search_returns_largest_qualifying_cut_not_earliest():
+    # event at t=120, pre_roll=8 -> fixed fallback would be 112; two cuts
+    # (100, 115) both qualify within max_cut_search_seconds=20 -- the
+    # nearest (115), not the earliest (100), must be used.
+    request = _request([_Event("e1", 120.0)], scene_cuts=(50.0, 100.0, 115.0), max_cut_search_seconds=20.0)
+    with generate_clips(request) as runner:
+        runner.run()
+
+    evidence = runner.evidence[0]
+    assert evidence.original_window[0] == 115.0
+    assert evidence.start_source == ClipStartSource.CUT_MATCHED
+
+
+def test_cut_exactly_at_max_search_distance_qualifies_one_second_further_does_not():
+    # event at t=120, max_cut_search_seconds=20 -> boundary is exactly t=100.
+    request_at_boundary = _request([_Event("e1", 120.0)], scene_cuts=(100.0,), max_cut_search_seconds=20.0)
+    with generate_clips(request_at_boundary) as runner:
+        runner.run()
+    assert runner.evidence[0].start_source == ClipStartSource.CUT_MATCHED
+    assert runner.evidence[0].original_window[0] == 100.0
+
+    request_beyond_boundary = _request([_Event("e1", 120.0)], scene_cuts=(99.0,), max_cut_search_seconds=20.0)
+    with generate_clips(request_beyond_boundary) as runner:
+        runner.run()
+    assert runner.evidence[0].start_source == ClipStartSource.FIXED_OFFSET
+
+
+def test_cut_exactly_at_event_timestamp_qualifies():
+    request = _request([_Event("e1", 120.0)], scene_cuts=(120.0,), max_cut_search_seconds=20.0)
+    with generate_clips(request) as runner:
+        runner.run()
+
+    evidence = runner.evidence[0]
+    assert evidence.start_source == ClipStartSource.CUT_MATCHED
+    assert evidence.original_window[0] == 120.0
+
+
+def test_unsorted_scene_cuts_produce_same_result_as_sorted():
+    request_unsorted = _request([_Event("e1", 120.0)], scene_cuts=(115.0, 50.0, 100.0), max_cut_search_seconds=20.0)
+    with generate_clips(request_unsorted) as runner:
+        runner.run()
+    unsorted_result = runner.evidence[0].original_window[0]
+
+    request_sorted = _request([_Event("e1", 120.0)], scene_cuts=(50.0, 100.0, 115.0), max_cut_search_seconds=20.0)
+    with generate_clips(request_sorted) as runner:
+        runner.run()
+    sorted_result = runner.evidence[0].original_window[0]
+
+    assert unsorted_result == sorted_result == 115.0
+
+
+def test_empty_scene_cuts_finds_no_candidate():
+    request = _request([_Event("e1", 120.0)], scene_cuts=())
+    with generate_clips(request) as runner:
+        runner.run()
+    assert runner.evidence[0].start_source == ClipStartSource.FIXED_OFFSET
+
+
+def test_scene_cuts_all_after_event_finds_no_candidate():
+    request = _request([_Event("e1", 120.0)], scene_cuts=(121.0, 150.0), max_cut_search_seconds=20.0)
+    with generate_clips(request) as runner:
+        runner.run()
+    assert runner.evidence[0].start_source == ClipStartSource.FIXED_OFFSET
+
+
+# -- specs/016-scene-cut-clip-windows US1: wiring into Pass 1 ---------------
+
+
+def test_event_with_qualifying_cut_uses_cut_as_raw_start():
+    request = _request([_Event("e1", 120.0)], pre_roll_seconds=8.0, scene_cuts=(115.0,), max_cut_search_seconds=20.0)
+    with generate_clips(request) as runner:
+        plan = runner.run()
+
+    evidence = runner.evidence[0]
+    assert evidence.original_window[0] == 115.0
+    assert evidence.start_source == ClipStartSource.CUT_MATCHED
+    assert plan.clips[0].clip_start_seconds == 115.0
+
+
+def test_event_with_no_qualifying_cut_falls_back_to_fixed_pre_roll():
+    request = _request([_Event("e1", 120.0)], pre_roll_seconds=8.0, scene_cuts=(1.0,), max_cut_search_seconds=20.0)
+    with generate_clips(request) as runner:
+        plan = runner.run()
+
+    evidence = runner.evidence[0]
+    assert evidence.original_window[0] == 112.0  # 120 - 8, unchanged from specs/008
+    assert evidence.start_source == ClipStartSource.FIXED_OFFSET
+    assert plan.clips[0].clip_start_seconds == 112.0
+
+
+def test_scene_cut_snapping_never_affects_raw_end_post_roll():
+    request = _request(
+        [_Event("e1", 120.0)], pre_roll_seconds=8.0, post_roll_seconds=12.0, scene_cuts=(115.0,), max_cut_search_seconds=20.0
+    )
+    with generate_clips(request) as runner:
+        runner.run()
+    assert runner.evidence[0].original_window[1] == 132.0  # 120 + 12, unaffected by snapping
+
+    request_fallback = _request([_Event("e1", 120.0)], pre_roll_seconds=8.0, post_roll_seconds=12.0, scene_cuts=())
+    with generate_clips(request_fallback) as runner:
+        runner.run()
+    assert runner.evidence[0].original_window[1] == 132.0
+
+
+def test_mixed_run_some_events_cut_matched_others_fixed_offset():
+    # e1 has a qualifying cut nearby; e2 does not.
+    request = _request(
+        [_Event("e1", 120.0), _Event("e2", 500.0)],
+        pre_roll_seconds=8.0,
+        merge_gap_seconds=3.0,
+        scene_cuts=(115.0,),
+        max_cut_search_seconds=20.0,
+    )
+    with generate_clips(request) as runner:
+        runner.run()
+        evidence = {e.event_id: e for e in runner.evidence}
+
+    assert evidence["e1"].start_source == ClipStartSource.CUT_MATCHED
+    assert evidence["e2"].start_source == ClipStartSource.FIXED_OFFSET
+    assert evidence["e2"].original_window[0] == 492.0  # 500 - 8, plain fallback
+
+
+def test_merge_engine_unaffected_by_mixed_start_source_windows():
+    # e1 (cut-matched, start snaps to 95 instead of fixed-offset 92) and e2
+    # (fixed-offset, start 102 -- the cut at 95 is 15s before e2's own
+    # timestamp of 110, beyond the 6s search distance used here, so e2 falls
+    # back) still merge under OVERLAP exactly as specs/008's existing merge
+    # rule dictates, regardless of how each window's start was produced.
+    request = _request(
+        [_Event("e1", 100.0), _Event("e2", 110.0)],
+        pre_roll_seconds=8.0,
+        post_roll_seconds=12.0,
+        merge_gap_seconds=3.0,
+        scene_cuts=(95.0,),
+        max_cut_search_seconds=6.0,
+    )
+    with generate_clips(request) as runner:
+        plan = runner.run()
+        evidence = {e.event_id: e for e in runner.evidence}
+
+    assert evidence["e1"].start_source == ClipStartSource.CUT_MATCHED
+    assert evidence["e2"].start_source == ClipStartSource.FIXED_OFFSET
+    assert plan.total_clips == 1
+    assert plan.clips[0].event_count == 2
+    assert plan.clips[0].clip_start_seconds == 95.0

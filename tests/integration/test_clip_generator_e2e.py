@@ -3,10 +3,14 @@ mixed replay inclusion/exclusion, determinism, and the plan-wide non-overlap
 postcondition (FR-008, SC-002).
 """
 
+import json
+import os
 from dataclasses import dataclass
 
+import pytest
+
 from cvip.clips.generator import generate_clips
-from cvip.clips.models import ClipGenerationRequest
+from cvip.clips.models import ClipGenerationRequest, ClipStartSource
 
 
 @dataclass(frozen=True)
@@ -112,3 +116,51 @@ def test_plan_wide_non_overlap_postcondition_across_mixed_merge_groups():
         assert later.clip_start_seconds > earlier.clip_end_seconds, "clips must not overlap"
         gap = later.clip_start_seconds - earlier.clip_end_seconds
         assert gap > request.merge_gap_seconds, "adjacent clips must be separated by more than merge_gap_seconds"
+
+
+# -- specs/016-scene-cut-clip-windows US1: real-data proof (SC-001) --------
+
+_SCENE_BOUNDARIES_FIXTURE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "matches", "ww_vs_pf_scene_boundaries.json"
+)
+
+# The real, previously-defective recovered event (specs/016 spec.md's
+# motivating case): match ww_vs_pf, event_id=37, over 7.0 FOUR, Phoenix
+# Firehawks innings, source='METADATA' -- verified by direct frame
+# inspection to land during a "REPLAY" overlay under the old fixed-offset
+# window. Queried directly from data/matches/ww_vs_pf.sqlite's `events`
+# table rather than hand-transcribed, so this test can't silently drift
+# from the real value.
+_DEFECTIVE_EVENT_TIMESTAMP_SECONDS = 7551.0
+
+
+@pytest.mark.skipif(
+    not os.path.exists(_SCENE_BOUNDARIES_FIXTURE),
+    reason=(
+        "data/matches/ww_vs_pf_scene_boundaries.json not yet available -- "
+        "produced by the standalone Scene Detection re-run "
+        "(data/matches/run_scene_detection_standalone.py), which decodes "
+        "the full 1080p broadcast and takes several hours"
+    ),
+)
+def test_real_defective_event_snaps_to_a_real_cut_near_its_anchor():
+    with open(_SCENE_BOUNDARIES_FIXTURE, encoding="utf-8") as f:
+        payload = json.load(f)
+    scene_cuts = tuple(b["timestamp_seconds"] for b in payload["boundaries"])
+
+    events = [_Event("37:7.0:FOUR", _DEFECTIVE_EVENT_TIMESTAMP_SECONDS)]
+    request = _request(
+        events,
+        video_duration_seconds=max(scene_cuts) + 3600.0,
+        scene_cuts=scene_cuts,
+        max_cut_search_seconds=20.0,
+    )
+    with generate_clips(request) as runner:
+        plan = runner.run()
+        evidence = runner.evidence[0]
+
+    assert evidence.start_source == ClipStartSource.CUT_MATCHED
+    assert evidence.original_window[0] in scene_cuts
+    distance = _DEFECTIVE_EVENT_TIMESTAMP_SECONDS - evidence.original_window[0]
+    assert 0.0 <= distance <= 20.0
+    assert plan.clips[0].clip_start_seconds == evidence.original_window[0]

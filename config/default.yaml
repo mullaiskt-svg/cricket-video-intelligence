@@ -131,8 +131,8 @@ events:
   # longer run-ups too; post_roll keeps a small margin above the observed
   # replay-completion point. A reasoned calibration from two samples, not an
   # exhaustively tuned value -- revisit if other footage shows it's wrong.
-  pre_roll_seconds: 35
-  post_roll_seconds: 15
+  pre_roll_seconds: 10
+  post_roll_seconds: 10
   merge_gap_seconds: 3
   # TEAM_MILESTONE fires each time the batting team's runs total crosses a
   # multiple of this interval (specs/007-event-detection/spec.md FR-008).

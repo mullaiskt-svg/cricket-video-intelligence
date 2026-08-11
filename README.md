@@ -28,6 +28,7 @@ An offline AI-powered platform that analyzes cricket match broadcasts once and g
 - [Feature Specifications](./specs/features.md)
 - [CLI Reference](./specs/cli.md)
 - [MVP Delivery Plan](./docs/MVP_PLAN.md)
+- [Project/module status and package layout](./CLAUDE.md) — the current state of every pipeline module, kept up to date as features land
 - Feature contracts live per-feature under `specs/<feature-name>/contracts/` (e.g., [specs/001-video-loader/contracts/](./specs/001-video-loader/contracts/)) — there is no single top-level contracts folder
 
 ## 🚀 Quick Start
@@ -65,14 +66,12 @@ specify init --here
 
 ### Workflow
 
-1. **Generate Tasks:** `claude /speckit.tasks`
-2. **Implement:** `claude /speckit.implement`
-3. **Test:** `pytest tests/`
-4. **Check environment:** `cvip doctor`
-5. **Analyze Match:** `cvip analyze input_video.mp4 --config config/default.yaml`
-6. **Generate Highlights:** `cvip generate <match_id> --template match --output output/match_highlights.mp4`
+1. **Check environment:** `cvip doctor`
+2. **Analyze Match:** `cvip analyze input_video.mp4 --config config/default.yaml`
+3. **Generate Highlights:** `cvip generate <match_id> --template match --output output/match_highlights.mp4`
+4. **Validate against ball-by-ball commentary (optional):** `cvip validate <match_id> --metadata commentary.json --recover --enrich` — cross-checks the analyzed match's OCR-detected events against externally-supplied commentary, recovering events OCR missed and attaching dismissal type/fielder detail. Fully decoupled from `analyze`/`generate` — safe to skip entirely.
 
-See [specs/cli.md](./specs/cli.md) for the full command reference.
+See [specs/cli.md](./specs/cli.md) for the full command reference. Spec-Kit's own workflow (`claude /speckit.specify`, `/speckit.plan`, `/speckit.tasks`, `/speckit.implement`) is how each pipeline module above was built — only needed when adding a new feature, not for day-to-day use of the CLI itself.
 
 ## 📂 Directory Structure
 
@@ -155,5 +154,5 @@ For questions or issues, please create a GitHub issue.
 
 ---
 
-**Last Updated:** July 2026
-**Status:** Spec-Kit Initialization Phase
+**Last Updated:** August 2026
+**Status:** MVP pipeline implemented and merged — `cvip analyze`/`cvip generate` run end-to-end (Video Loader through Event Detection, then Clip Generator → Video Stitcher), backed by the Event Database. The optional Structured Match Metadata Validation Layer (`cvip validate`) is also implemented, including Anchor Validation for its `--recover` path. See [CLAUDE.md](./CLAUDE.md)'s Pipeline Modules table for per-module detail.
